@@ -1,5 +1,5 @@
 /*
- * An implementation of commited access rate for Linux iptables
+ * An implementation of committed access rate for Linux iptables
  * (c) 2015 <abc@telekom.ru>
  *
  * Based on xt_hashlimit and in lesser extent on xt_recent.
@@ -78,12 +78,12 @@ struct ratelimit_net {
 /* CAR accounting */
 struct ratelimit_car {
 	unsigned long last;		/* last refill (jiffies) */
-	u32 tc;				/* commited token bucket counter */
+	u32 tc;				/* committed token bucket counter */
 	u32 te;				/* exceeded token bucket counter */
 
-	u32 cbs;			/* commited burst size (bytes) */
+	u32 cbs;			/* committed burst size (bytes) */
 	u32 ebs;			/* extended burst size (bytes) */
-	u32 cir;			/* commited information rate (bits/s) */
+	u32 cir;			/* committed information rate (bits/s) */
 };
 
 struct ratelimit_stat {

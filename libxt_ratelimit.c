@@ -1,5 +1,5 @@
 /*
- * An implementation of commited access rate for Linux iptables
+ * An implementation of committed access rate for Linux iptables
  * (c) 2015 <abc@telekom.ru>
  *
  *

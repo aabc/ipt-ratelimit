@@ -1,0 +1,118 @@
+ipt-ratelimit linux 3.x kernel module by <abc@telekom.ru> -- (c) 2015.
+
+   An implementation of committed access rate, or simply rate limiting, or
+   policing) for Linux iptables, implemented with high performance in mind.
+
+
+================
+= INSTALLATION =
+================
+
+  ** 1. Prepare Kernel source
+
+  What to do for Debian and Ubuntu:
+
+      sudo# apt-get install module-assistant
+      sudo# m-a prepare
+
+  ** 2. Prepare Iptables
+
+  What to do for Debian or Ubuntu:
+
+      sudo# apt-get install iptables-dev pkg-config
+
+  ** 3. Now, to actually build the module run:
+
+      ~/ipt-ratelimit# make all install
+      ~/ipt-ratelimit# depmod
+
+===========
+=  USAGE  =
+===========
+
+    # modinfo xt_ratelimit.ko
+    parm:           hashsize:default size of hash table used to look
+                    up IPs (uint)
+
+  Parameter hashsize allows to specify size of every hash table (default is
+  10000). Increase if you plan to use more IPs than that. Best value is twice
+  as much IPs you are planning to use.
+
+    # iptables -m ratelimit --help
+    ratelimit match options:
+      --ratelimit-set <name>    Name of the ratelimit set to be used.
+				DEFAULT will be used if none given.
+      --ratelimit-mode <mode>   Address match: src or dst.
+
+  Both options are mandatory. Every set should be first created with iptables
+  and will have configuration and stat file /proc/net/ipt_ratelimit/<name>
+
+  * To create set named "name0":
+
+    # iptables --ratelimit-set name0 --ratelimit-mode src -j DROP
+
+  (NB!) This will:
+   - match src (source) IP address of every packet in the set name0,
+   - apply, configured in the set, rate-limit rule to it,
+   - and if packet is  exceeding configured rate it will MATCH the rule,
+   - thus, matched traffic is directed to the -j DROP target.
+
+  Usage of set files:
+
+    * To flush (clean) set named "name0":
+
+      # echo / > /proc/net/ipt_ratelimit/name0
+
+    This set should be previously created with --ratelimit-set name0 option.
+
+    * To add IPs to the set write string in the following format:
+
+       +IP[,IP...] bitrate [normal_burst [extended_burst]]
+
+    Examples:
+
+      # echo +10.0.0.1 1000000 > /proc/net/ipt_ratelimit/name0
+      # echo +10.0.0.1 1000000 187500 > /proc/net/ipt_ratelimit/name0
+      # echo +10.0.0.1 1000000 187500 375000 > /proc/net/ipt_ratelimit/name0
+
+      - last three lines are equal, becasue normal burst (cbs) and extended
+        burst (ebs), if not specified, are calculated automatically by optimal
+        formula:
+
+          normal_burst = bitrate * (1 byte)/(8 bits) * 1.5 seconds
+          extended_burst = 2 * normal_burst
+
+      # echo +10.0.0.1,10.0.0.2 10000000 > /proc/net/ipt_ratelimit/name0
+
+      - multiple IPs, rate willbe calculated for them together (not
+        separately).
+
+    * To delete IPs from the set:
+
+      # echo -10.0.0.1 > /proc/net/ipt_ratelimit/name
+      # echo -10.0.0.1,10.0.0.2 > /proc/net/ipt_ratelimit/name0
+
+    * To view statistics:
+
+      # cat /proc/net/ipt_ratelimit/name0
+
+    Format is:
+
+    10.0.1.5 cir 1000000 cbs 187500 ebs 375000; tc 0 te 0 last never; conf 0/0 0 bps, rej 0/0 0 bps
+
+      10.0.1.5  IP to match
+      cir 1000000  allowed rate (cir is committed information rate) in bits
+      cbs 187500   normal burst (cbs is committed burst size) in bytes
+      ebs 375000   extended burst (cbs is extended burst size) in bytes
+      tc 0         committed token bucket counter
+      te 0         extended token bucket counter (implementing extended burst)
+      last never   how much seconds ago last packet is seen
+      conf 0/0 0 bps
+                   confirming traffic stat (pkts/bytes bitrate)
+		   Note, that bitrate here is calculated from the first seen to
+		   the last seen packet, not to the 'now'.
+      rej 0/0 0 bps
+                   rejected (or matched) traffic stat.
+
+
+===========
