@@ -43,10 +43,17 @@
 #include "compat.h"
 #include "xt_ratelimit.h"
 
+#define XT_RATELIMIT_VERSION "0.1"
+#include "version.h"
+#ifdef GIT_VERSION
+# undef XT_RATELIMIT_VERSION
+# define XT_RATELIMIT_VERSION GIT_VERSION
+#endif
+
 MODULE_AUTHOR("<abc@telekom.ru>");
 MODULE_DESCRIPTION("iptables ratelimit policer mt module");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1");
+MODULE_VERSION(XT_RATELIMIT_VERSION);
 MODULE_ALIAS("ipt_ratelimit");
 
 static unsigned int hashsize __read_mostly = 10000;
@@ -854,7 +861,7 @@ static int __init ratelimit_mt_init(void)
         err = xt_register_matches(ratelimit_mt_reg, ARRAY_SIZE(ratelimit_mt_reg));
         if (err)
                 unregister_pernet_subsys(&ratelimit_net_ops);
-	pr_info("load %s.\n", err? "error" : "success");
+	pr_info(XT_RATELIMIT_VERSION " load %s.\n", err? "error" : "success");
         return err;
 }
 

@@ -7,7 +7,7 @@ CFLAGS_xt_ratelimit.o := -DDEBUG
 
 all: xt_ratelimit.ko libxt_ratelimit.so
 
-xt_ratelimit.ko: xt_ratelimit.c xt_ratelimit.h
+xt_ratelimit.ko: version.h xt_ratelimit.c xt_ratelimit.h compat.h
 	make -C $(KDIR) M=$(CURDIR) modules CONFIG_DEBUG_INFO=y
 	-sync
 
@@ -16,6 +16,9 @@ xt_ratelimit.ko: xt_ratelimit.c xt_ratelimit.h
 
 %.so: %_sh.o
 	gcc -shared -o $@ $<
+
+version.h: xt_ratelimit.c xt_ratelimit.h compat.h Makefile
+	@./version.sh --define > version.h
 
 clean:
 	make -C $(KDIR) M=$(CURDIR) clean
@@ -37,15 +40,18 @@ load: all
 	-sync
 	-modprobe x_tables
 	-insmod xt_ratelimit.ko
-	-iptables -I INPUT -m ratelimit --ratelimit-set test --ratelimit-mode src -j DROP
-	-echo +127.0.0.1 1000000 > /proc/net/ipt_ratelimit/test
+	-iptables -I INPUT  -m ratelimit --ratelimit-set src --ratelimit-mode src -j DROP
+	-iptables -I OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
+	-echo +127.0.0.1 1000000 > /proc/net/ipt_ratelimit/src
+	-echo +127.0.0.1 1000000 > /proc/net/ipt_ratelimit/dst
 unload:
-	-echo / > /proc/net/ipt_ratelimit/test
-	-iptables -D INPUT -m ratelimit --ratelimit-set test --ratelimit-mode src -j DROP
+	-echo / > /proc/net/ipt_ratelimit/src
+	-iptables -D INPUT  -m ratelimit --ratelimit-set src --ratelimit-mode src -j DROP
+	-iptables -D OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
 	-rmmod xt_ratelimit.ko
 del:
 	-sync
-	-echo -127.0.0.1 1000000 > /proc/net/ipt_ratelimit/test
+	-echo -127.0.0.1 1000000 > /proc/net/ipt_ratelimit/dst
 reload: unload load
 
 .PHONY: all minstall linstall install uninstall clean
