@@ -102,7 +102,7 @@ struct ratelimit_ent {
 	int mtcnt;			/* size of matches[mtcnt] */
 	struct ratelimit_stat stat;
 	struct ratelimit_car car;
-	spinlock_t lock;
+	spinlock_t lock_bh;
 
 		/* variable sized array for actual hash entries, it's
 		 * to optimize memory allocation and data locality
@@ -144,7 +144,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 		return 0;
 
 	/* lock for consistent reads from the counters */
-	spin_lock_bh(&ent->lock);
+	spin_lock_bh(&ent->lock_bh);
 	for (i = 0; i < ent->mtcnt; i++) {
 		seq_printf(s, "%s%pI4",
 		    i == 0? "" : ",",
@@ -173,7 +173,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 #endif
 	seq_printf(s, "\n");
 
-	spin_unlock_bh(&ent->lock);
+	spin_unlock_bh(&ent->lock_bh);
 	return seq_has_overflowed(s);
 }
 
@@ -198,7 +198,7 @@ static void *ratelimit_seq_start(struct seq_file *s, loff_t *pos)
 	struct xt_ratelimit_htable *ht = s->private;
 	unsigned int *bucket;
 
-	spin_lock_bh(&ht->lock);
+	spin_lock(&ht->lock);
 	if (*pos >= ht->size)
 		return NULL;
 
@@ -231,7 +231,7 @@ static void ratelimit_seq_stop(struct seq_file *s, void *v)
 
 	if (!IS_ERR(bucket))
 		kfree(bucket);
-	spin_unlock_bh(&ht->lock);
+	spin_unlock(&ht->lock);
 }
 
 static const struct seq_operations ratelimit_seq_ops = {
@@ -319,7 +319,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	if (!ent)
 		return -ENOMEM;
 
-	spin_lock_init(&ent->lock);
+	spin_lock_init(&ent->lock_bh);
 	for (i = 0, p = str; in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p); ++p, ++i) {
 		struct ratelimit_match *mt = &ent->matches[i];
 		int j;
@@ -380,7 +380,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		return -EINVAL;
 	}
 
-	spin_lock_bh(&ht->lock);
+	spin_lock(&ht->lock);
 	/* check existence of these IPs */
 	ent_chk = NULL;
 	for (i = 0; i < ent->mtcnt; ++i) {
@@ -423,14 +423,14 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		ent = NULL;
 	} else
 		ratelimit_ent_del(ht, ent_chk);
-	spin_unlock_bh(&ht->lock);
+	spin_unlock(&ht->lock);
 
 	if (ent)
 		kvfree(ent);
 	return 0;
 
 unlock_einval:
-	spin_unlock_bh(&ht->lock);
+	spin_unlock(&ht->lock);
 	kvfree(ent);
 	return -EINVAL;
 }
@@ -561,7 +561,7 @@ ratelimit_match_find_lock(const struct xt_ratelimit_htable *ht,
 	struct ratelimit_ent *ent = ratelimit_match_find(ht, addr);
 
 	if (ent)
-		spin_lock(&ent->lock);
+		spin_lock(&ent->lock_bh);
 	return ent;
 }
 
@@ -636,11 +636,11 @@ static void htable_cleanup(struct xt_ratelimit_htable *ht)
 		struct ratelimit_match *mt;
 		struct hlist_node *n;
 
-		spin_lock_bh(&ht->lock);
+		spin_lock(&ht->lock);
 		hlist_for_each_entry_safe(mt, n, &ht->hash[i], node) {
 			ratelimit_match_free(ht, mt);
 		}
-		spin_unlock_bh(&ht->lock);
+		spin_unlock(&ht->lock);
 		cond_resched();
 	}
 	pr_debug("htable_cleanup OUT\n");
@@ -794,7 +794,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 			ent->stat.green_bytes += len;
 			ent->stat.green_pkt++;
 		}
-		spin_unlock(&ent->lock);
+		spin_unlock(&ent->lock_bh);
 	}
 
 	rcu_read_unlock();
