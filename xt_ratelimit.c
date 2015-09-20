@@ -91,9 +91,7 @@ struct ratelimit_stat {
 	u64 red_bytes;
 	u32 green_pkt;
 	u32 red_pkt;
-#ifdef DEBUG
 	unsigned long first;		/* first time seen */
-#endif
 };
 
 /* hash bucket entity */
@@ -139,6 +137,8 @@ static inline struct ratelimit_net *ratelimit_pernet(struct net *net)
         return net_generic(net, ratelimit_net_id);
 }
 
+#define SAFEDIV(x,y) ((y)? ({ u64 __tmp = x; do_div(__tmp, y); (unsigned int)__tmp; }) : 0)
+
 static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
     struct seq_file *s)
 {
@@ -166,18 +166,14 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	else
 		seq_printf(s, " never;");
 
-	seq_printf(s, " G %u/%llu R %u/%llu",
-	    ent->stat.green_pkt,  ent->stat.green_bytes,
-	    ent->stat.red_pkt,    ent->stat.red_bytes);
+	seq_printf(s, " conf %u/%llu %u bps, rej %u/%llu %u bps",
+	    ent->stat.green_pkt, ent->stat.green_bytes,
+	    SAFEDIV(ent->stat.green_bytes * 8,
+		    (ent->car.last - ent->stat.first) / HZ),
+	    ent->stat.red_pkt, ent->stat.red_bytes,
+	    SAFEDIV(ent->stat.red_bytes * 8,
+		    (ent->car.last - ent->stat.first) / HZ));
 
-#ifdef DEBUG
-	if ((ent->car.last - ent->stat.first) / HZ)
-		seq_printf(s, " conf_bps %llu rej_bps %llu",
-		    (ent->stat.green_bytes) * 8 /
-		    ((ent->car.last - ent->stat.first) / HZ),
-		    (ent->stat.red_bytes) * 8 /
-		    ((ent->car.last - ent->stat.first) / HZ));
-#endif
 	seq_printf(s, "\n");
 
 	spin_unlock_bh(&ent->lock_bh);
@@ -748,10 +744,8 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 			const u32 tok = delta_ms * (car->cir / (BITS_PER_BYTE * MSEC_PER_SEC));
 
 			car->tc -= min(tok, car->tc);
-#ifdef DEBUG
 			if (!ent->stat.first)
 				ent->stat.first = now;
-#endif
 			car->last = now;
 		}
 		if (car->tc > car->cbs) { /* extended burst */
