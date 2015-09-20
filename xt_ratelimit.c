@@ -443,7 +443,6 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 	struct xt_ratelimit_htable *ht = PDE_DATA(file_inode(file));
 	char *p;
 
-	pr_info("write:  in %p size %lu off %llu\n", input, size, *loff);
 	if (!size)
 		return 0;
 	if (size > sizeof(buf))
@@ -451,7 +450,6 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 	if (copy_from_user(buf, input, size) != 0)
 		return -EFAULT;
 
-	pr_info("write: buf %p size %lu off %llu\n", buf, size, *loff);
 	for (p = buf; p < &buf[size]; ) {
 		char *str = p;
 
@@ -461,7 +459,6 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 			/* untermianted command */
 			if (str == buf) {
 				pr_err("Rule should end with '\\n'\n");
-				pr_info("buf %p str %p p %p size %lu\n", buf, str, p, size);
 				return -EINVAL;
 			} else {
 				p = str;
@@ -474,7 +471,6 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 	}
 
 	*loff += p - buf;
-	pr_info("    ret size %lu off %llu\n", p - buf, *loff);
 	return p - buf;
 }
 
@@ -585,7 +581,6 @@ static void ratelimit_ent_free_rcu(struct rcu_head *head)
 {
 	struct ratelimit_ent *ent = container_of(head, struct ratelimit_ent, rcu);
 
-	pr_debug("ratelimit_ent_free_rcu ent=%p\n", ent);
 	kvfree(ent);
 }
 
@@ -599,30 +594,19 @@ static void ratelimit_match_free(struct xt_ratelimit_htable *ht,
 {
 	struct ratelimit_ent *ent = mt->ent;
 
-	pr_debug(" ratelimit_match_free IN: ent->mtcnt %d, ht->ent_count, %d, ht->mt_count %d\n",
-	    ent->mtcnt, ht->ent_count, ht->mt_count);
-
-	pr_debug(" ratelimit_match_free next hlist_del_rcu %p [%p %p]\n", &mt->node, mt->node.next, mt->node.pprev);
 	hlist_del_rcu(&mt->node);
-	pr_debug(" ratelimit_match_free after hlist_del_rcu, next BUG_ON %d\n", ht->mt_count);
 	BUG_ON(ht->mt_count == 0);
 	--ht->mt_count;
 
-	pr_debug(" ratelimit_match_free next BUG_ON %d, if\n", ent->mtcnt);
 	BUG_ON(ent->mtcnt == 0);
 	if (--ent->mtcnt == 0) {
 		/* ent is linked to hash table only from matches,
 		 * deallocate ent if no matches are linked */
-		pr_debug(" ratelimit_match_free call call_rcu\n");
 		call_rcu(&ent->rcu, ratelimit_ent_free_rcu);
 
-		pr_debug(" ratelimit_match_free BUG_ON %d\n", ht->ent_count);
 		BUG_ON(ht->ent_count == 0);
-		pr_debug(" ratelimit_match_free ht->ent_count--\n");
 		ht->ent_count--;
 	}
-	pr_debug(" ratelimit_match_free OUT: ht->ent_count, %d, ht->mt_count %d\n",
-	    ht->ent_count, ht->mt_count);
 }
 
 /* destroy linked content of hash table */
@@ -631,7 +615,6 @@ static void htable_cleanup(struct xt_ratelimit_htable *ht)
 {
 	unsigned int i;
 
-	pr_debug("htable_cleanup IN [%d]\n", ht->size);
 	for (i = 0; i < ht->size; i++) {
 		struct ratelimit_match *mt;
 		struct hlist_node *n;
@@ -643,7 +626,6 @@ static void htable_cleanup(struct xt_ratelimit_htable *ht)
 		spin_unlock(&ht->lock);
 		cond_resched();
 	}
-	pr_debug("htable_cleanup OUT\n");
 }
 
 /* remove ratelimit entry, called from proc interface */
@@ -653,20 +635,16 @@ static void ratelimit_ent_del(struct xt_ratelimit_htable *ht,
 {
 	int i;
 
-	pr_debug("ratelimit_ent_del IN ent=%p, ent->mtcnt %d\n", ent, ent->mtcnt);
 	/* ratelimit_match_free() changes ent->mtcnt */
 	for (i = ent->mtcnt; i; )
 		ratelimit_match_free(ht, &ent->matches[--i]);
-	pr_debug("ratelimit_ent_del OUT\n");
 }
 
 static void ratelimit_table_flush(struct xt_ratelimit_htable *ht)
 {
-	pr_debug("ratelimit_table_flush IN\n");
 	mutex_lock(&ratelimit_mutex);
 	htable_cleanup(ht);
 	mutex_unlock(&ratelimit_mutex);
-	pr_debug("ratelimit_table_flush OUT\n");
 }
 
 /* register entry into hash table */
@@ -676,17 +654,14 @@ static void ratelimit_ent_add(struct xt_ratelimit_htable *ht,
 {
 	int i;
 
-	pr_debug("ratelimit_ent_add IN: ent=%p\n", ent);
 	/* add each match address into htable hash */
 	for (i = 0; i < ent->mtcnt; i++) {
 		struct ratelimit_match *mt = &ent->matches[i];
 
-		pr_debug("hlist_add_head_rcu %p\n", &mt->node);
 		hlist_add_head_rcu(&mt->node, &ht->hash[hash_addr(ht, mt->addr)]);
 		ht->mt_count++;
 	}
 	ht->ent_count++;
-	pr_debug("ratelimit_ent_add OUT: ent=%p\n", ent);
 }
 
 static void htable_destroy(struct xt_ratelimit_htable *ht)
@@ -695,20 +670,15 @@ static void htable_destroy(struct xt_ratelimit_htable *ht)
 {
 	struct ratelimit_net *ratelimit_net = ratelimit_pernet(ht->net);
 
-	pr_debug("htable_destroy IN: ent_count %d, mt_count %d\n", ht->ent_count, ht->mt_count);
 	/* ratelimit_net_exit() can independently unregister
 	 * proc entries */
 	if (ratelimit_net->ipt_ratelimit) {
-		pr_debug("remove_proc_entry call, %s\n", ht->name);
 		remove_proc_entry(ht->name, ratelimit_net->ipt_ratelimit);
-		pr_debug("remove_proc_entry return\n");
 	}
 
-	pr_debug("htable_destroy call htable_cleanup\n");
 	htable_cleanup(ht);
 	BUG_ON(ht->mt_count != 0);
 	BUG_ON(ht->ent_count != 0);
-	pr_debug("htable_destroy OUT: ent_count %d, mt_count %d\n", ht->ent_count, ht->mt_count);
 	kvfree(ht);
 }
 
@@ -736,12 +706,10 @@ static void htable_put(struct xt_ratelimit_htable *ht)
 	/* caller ratelimit_mt_destroy, iptables rule deletion */
 	/* under ratelimit_mutex */
 {
-	pr_debug("htable_put IN, use %d\n", ht->use);
 	if (--ht->use == 0) {
 		hlist_del(&ht->node);
 		htable_destroy(ht);
 	}
-	pr_debug("htable_put OUT\n");
 }
 
 /* match the packet */
@@ -809,7 +777,6 @@ static int ratelimit_mt_check(const struct xt_mtchk_param *par)
 	struct xt_ratelimit_mtinfo *mtinfo = par->matchinfo;
 	int ret;
 
-	pr_debug("ratelimit_mt_check\n");
 	if (mtinfo->name[sizeof(mtinfo->name) - 1] != '\0')
 		return -EINVAL;
 
@@ -825,7 +792,6 @@ static void ratelimit_mt_destroy(const struct xt_mtdtor_param *par)
 {
 	const struct xt_ratelimit_mtinfo *mtinfo = par->matchinfo;
 
-	pr_debug("ratelimit_mt_destroy\n");
 	mutex_lock(&ratelimit_mutex);
 	htable_put(mtinfo->ht);
 	mutex_unlock(&ratelimit_mutex);
@@ -882,19 +848,19 @@ static int __init ratelimit_mt_init(void)
 {
         int err;
 
-	pr_debug("ratelimit_mt_init\n");
         err = register_pernet_subsys(&ratelimit_net_ops);
         if (err)
                 return err;
         err = xt_register_matches(ratelimit_mt_reg, ARRAY_SIZE(ratelimit_mt_reg));
         if (err)
                 unregister_pernet_subsys(&ratelimit_net_ops);
+	pr_info("load %s.\n", err? "error" : "success");
         return err;
 }
 
 static void __exit ratelimit_mt_exit(void)
 {
-	pr_debug("ratelimit_mt_exit\n");
+	pr_info("unload.\n");
         xt_unregister_matches(ratelimit_mt_reg, ARRAY_SIZE(ratelimit_mt_reg));
         unregister_pernet_subsys(&ratelimit_net_ops);
 }
