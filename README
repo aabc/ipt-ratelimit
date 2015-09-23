@@ -1,7 +1,8 @@
 ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
    An high-performance implementation of committed access rate, or simply rate
-   limiting, or policing) for Linux iptables.
+   limiting, or policing for Linux iptables. Suitable for a lot of users and
+   not have qdisc limitations.
 
 
 ============
