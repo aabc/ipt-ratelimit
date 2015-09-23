@@ -1,14 +1,30 @@
-ipt-ratelimit linux 3.x kernel module by <abc@telekom.ru> -- (c) 2015.
+ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
-   An implementation of committed access rate, or simply rate limiting, or
-   policing) for Linux iptables, implemented with high performance in mind.
+   An high-performance implementation of committed access rate, or simply rate
+   limiting, or policing) for Linux iptables.
+
+
+============
+= ABSTRACT =
+============
+
+  ipt-ratelimit module implements traffic policing (i.e. limiting traffic bit
+  rate) using, standard for this purpose, token bucket filter (TBF) algorithm.
+  Particular implementation is based on FreeBSD's implementation of Cisco's TBF
+  with extended burst value (which is used to implement RED-like drop
+  behavior).
+
+  Module is compatible with recent linux distributions such as Debian 7, 8,
+  Centos 7, and Linux kernel 3.x or above.
 
 
 ================
 = INSTALLATION =
 ================
 
-  ** 1. Prepare Kernel source
+  Easy three steps:
+
+  ** 1. Prepare Kernel source for module compilation
 
   What to do for Debian and Ubuntu:
 
@@ -26,17 +42,22 @@ ipt-ratelimit linux 3.x kernel module by <abc@telekom.ru> -- (c) 2015.
       ~/ipt-ratelimit# make all install
       ~/ipt-ratelimit# depmod
 
+
 ===========
 =  USAGE  =
 ===========
+
+  * Module parameter:
 
     # modinfo xt_ratelimit.ko
     parm:           hashsize:default size of hash table used to look
                     up IPs (uint)
 
-  Parameter hashsize allows to specify size of every hash table (default is
-  10000). Increase if you plan to use more IPs than that. Best value is twice
-  as much IPs you are planning to use.
+  Parameter hashsize allows to specify size of every set's hash table (default
+  value is 10000). Increase if you plan to use more IPs than that. Best value
+  is twice as much IPs you are planning to use.
+
+  * iptables options:
 
     # iptables -m ratelimit --help
     ratelimit match options:
@@ -45,29 +66,23 @@ ipt-ratelimit linux 3.x kernel module by <abc@telekom.ru> -- (c) 2015.
       --ratelimit-mode <mode>   Address match: src or dst.
 
   Both options are mandatory. Every set should be first created with iptables
-  and will have configuration and stat file /proc/net/ipt_ratelimit/<name>
+  before it will have configuration file /proc/net/ipt_ratelimit/<name>
 
   * To create set named "name0":
 
     # iptables --ratelimit-set name0 --ratelimit-mode src -j DROP
 
-  (NB!) This will:
+  This command will work like this:
    - match src (source) IP address of every packet in the set name0,
-   - apply, configured in the set, rate-limit rule to it,
-   - and if packet is  exceeding configured rate it will MATCH the rule,
+   - apply appropriate rate-limit rule to it,
+   - and if packet is exceeding configured rate it will MATCH the rule,
    - thus, matched traffic is directed to the -j DROP target.
 
   Usage of set files:
 
-    * To flush (clean) set named "name0":
-
-      # echo / > /proc/net/ipt_ratelimit/name0
-
-    This set should be previously created with --ratelimit-set name0 option.
-
     * To add IPs to the set write string in the following format:
 
-       +IP[,IP...] bitrate [normal_burst [extended_burst]]
+       +IPv4[,IPv4...] bitrate [normal_burst [extended_burst]]
 
     Examples:
 
@@ -75,44 +90,48 @@ ipt-ratelimit linux 3.x kernel module by <abc@telekom.ru> -- (c) 2015.
       # echo +10.0.0.1 1000000 187500 > /proc/net/ipt_ratelimit/name0
       # echo +10.0.0.1 1000000 187500 375000 > /proc/net/ipt_ratelimit/name0
 
-      - last three lines are equal, becasue normal burst (cbs) and extended
-        burst (ebs), if not specified, are calculated automatically by optimal
-        formula:
+      - these three lines are equal, becasue normal burst (cbs) and extended
+	burst (ebs), when not specified, are calculated automatically by
+	optimal formula:
 
           normal_burst = bitrate * (1 byte)/(8 bits) * 1.5 seconds
           extended_burst = 2 * normal_burst
 
       # echo +10.0.0.1,10.0.0.2 10000000 > /proc/net/ipt_ratelimit/name0
 
-      - multiple IPs, rate willbe calculated for them together (not
-        separately).
+      - add multiple IPs, rate will be calculated for them together (not
+        separately). For example if you want limit client with multiple IPs.
 
     * To delete IPs from the set:
 
-      # echo -10.0.0.1 > /proc/net/ipt_ratelimit/name
+      # echo -10.0.0.1 > /proc/net/ipt_ratelimit/name0
       # echo -10.0.0.1,10.0.0.2 > /proc/net/ipt_ratelimit/name0
+
+    * To flush (clean) set named "name0" (i.e. delete all rules):
+
+      # echo / > /proc/net/ipt_ratelimit/name0
 
     * To view statistics:
 
       # cat /proc/net/ipt_ratelimit/name0
 
-    Format is:
+    * Stat output example and format:
 
     10.0.1.5 cir 1000000 cbs 187500 ebs 375000; tc 0 te 0 last never; conf 0/0 0 bps, rej 0/0 0 bps
 
-      10.0.1.5  IP to match
-      cir 1000000  allowed rate (cir is committed information rate) in bits
-      cbs 187500   normal burst (cbs is committed burst size) in bytes
-      ebs 375000   extended burst (cbs is extended burst size) in bytes
-      tc 0         committed token bucket counter
-      te 0         extended token bucket counter (implementing extended burst)
-      last never   how much seconds ago last packet is seen
+      10.0.1.5     IP to match,
+      cir 1000000  allowed rate   (cir is committed information rate) in bits,
+      cbs 187500   normal burst   (cbs is committed burst size) in bytes,
+      ebs 375000   extended burst (cbs is extended burst size) in bytes,
+      tc 0         committed token bucket counter,
+      te 0         extended token bucket counter (implementing extended burst),
+      last never   how much seconds ago last packet is seen,
       conf 0/0 0 bps
-                   confirming traffic stat (pkts/bytes bitrate)
+                   conforming traffic counters (pkts/bytes bitrate),
 		   Note, that bitrate here is calculated from the first seen to
 		   the last seen packet, not to the 'now'.
       rej 0/0 0 bps
-                   rejected (or matched) traffic stat.
+                   rejected (or matched) traffic counters.
 
 
 ===========
