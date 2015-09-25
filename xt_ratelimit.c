@@ -43,7 +43,7 @@
 #include "compat.h"
 #include "xt_ratelimit.h"
 
-#define XT_RATELIMIT_VERSION "0.1"
+#define XT_RATELIMIT_VERSION "0.2"
 #include "version.h"
 #ifdef GIT_VERSION
 # undef XT_RATELIMIT_VERSION
