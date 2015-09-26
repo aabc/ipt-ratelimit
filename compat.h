@@ -1,8 +1,9 @@
-
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,19,0)
 static inline bool seq_has_overflowed(struct seq_file *m)
 {
 	return m->count == m->size;
 }
+#endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0)
 void kvfree(const void *addr)
