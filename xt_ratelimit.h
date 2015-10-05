@@ -33,6 +33,7 @@ enum {
 
 struct xt_ratelimit_mtinfo {
 	__u32 mode;
+	__u32 htable_size;
 	char name[XT_RATELIMIT_NAME_LEN];
 
 	/* valus below only used in kernel */

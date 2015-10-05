@@ -47,6 +47,7 @@ static void ratelimit_help(void)
 enum {
 	O_NAME,
 	O_MODE,
+	O_HTABLE_SIZE,
 };
 
 #define s struct xt_ratelimit_mtinfo
@@ -55,6 +56,9 @@ static const struct xt_option_entry ratelimit_opts[] = {
 	 .flags = XTOPT_MAND | XTOPT_PUT, XTOPT_POINTER(s, name), .min = 1},
 	{.name = "ratelimit-mode", .id = O_MODE, .type = XTTYPE_STRING,
 	 .flags = XTOPT_MAND},
+	{.name = "ratelimit-htable-size", .id = O_HTABLE_SIZE,
+		.type = XTTYPE_UINT32, .flags = XTOPT_PUT,
+		XTOPT_POINTER(s, htable_size)},
 	XTOPT_TABLEEND,
 };
 #undef s
@@ -99,7 +103,8 @@ static void ratelimit_init(struct xt_entry_match *match)
 
 	strncpy(info->name, "DEFAULT", XT_RATELIMIT_NAME_LEN);
 	info->name[XT_RATELIMIT_NAME_LEN - 1] = '\0';
-	info->mode = 0;
+	info->mode	  = 0;
+	info->htable_size = 0;
 }
 
 static void ratelimit_print(const void *ip, const struct xt_entry_match *match,
