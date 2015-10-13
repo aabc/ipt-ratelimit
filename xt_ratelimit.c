@@ -438,29 +438,30 @@ unlock_einval:
 	return -EINVAL;
 }
 
+static char proc_buf[4000];
+
 static ssize_t
 ratelimit_proc_write(struct file *file, const char __user *input,
     size_t size, loff_t *loff)
 {
-	char buf[1024];
 	struct xt_ratelimit_htable *ht = PDE_DATA(file_inode(file));
 	char *p;
 
 	if (!size)
 		return 0;
-	if (size > sizeof(buf))
-		size = sizeof(buf);
-	if (copy_from_user(buf, input, size) != 0)
+	if (size > sizeof(proc_buf))
+		size = sizeof(proc_buf);
+	if (copy_from_user(proc_buf, input, size) != 0)
 		return -EFAULT;
 
-	for (p = buf; p < &buf[size]; ) {
+	for (p = proc_buf; p < &proc_buf[size]; ) {
 		char *str = p;
 
-		while (p < &buf[size] && *p != '\n')
+		while (p < &proc_buf[size] && *p != '\n')
 			++p;
 		if (*p != '\n') {
 			/* untermianted command */
-			if (str == buf) {
+			if (str == proc_buf) {
 				pr_err("Rule should end with '\\n'\n");
 				return -EINVAL;
 			} else {
@@ -473,8 +474,8 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 			return -EINVAL;
 	}
 
-	*loff += p - buf;
-	return p - buf;
+	*loff += p - proc_buf;
+	return p - proc_buf;
 }
 
 static const struct file_operations ratelimit_fops = {
