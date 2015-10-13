@@ -263,8 +263,9 @@ static void ratelimit_ent_del(struct xt_ratelimit_htable *ht, struct ratelimit_e
 
 static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 {
-	char * const buf = str;
+	char * const buf = str; /* for logging only */
 	const char *p;
+	const char * const endp = str + size;
 	struct ratelimit_ent *ent;
 	struct ratelimit_ent *ent_chk;
 	__be32 addr;
@@ -272,8 +273,12 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	int add;
 	int i;
 
-	if (!size)
+	/* make sure that size is enough for two decrements */
+	if (size < 2 || !str || !ht)
 		return -EINVAL;
+
+	/* strip trailing newline for better formatting of error messages */
+	str[--size] = '\0';
 
 	/* rule format is: +address[,address...] [keyword value]...
 	 * address set is unique key for parameters,
@@ -295,17 +300,16 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 			pr_err("Rule should start with '+', '-', or '/'\n");
 			return -EINVAL;
 	}
-
-	/* strip trailing newline for better formatting of error messages */
-	str[--size] = '\0';
 	++str;
 	--size;
 
 	/* determine address set size */
 	ent_size = 0;
-	for (p = str; in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p); ++p) {
+	for (p = str;
+	    p < endp && in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p);
+	    ++p) {
 		++ent_size;
-		if (*p == ' ' || p >= &str[size])
+		if (p >= endp || !*p || *p == ' ')
 			break;
 		else if (*p != ',') {
 			pr_err("IP addresses should be separated with ',' (cmd: %s)\n", buf);
@@ -323,40 +327,45 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		return -ENOMEM;
 
 	spin_lock_init(&ent->lock_bh);
-	for (i = 0, p = str; in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p); ++p, ++i) {
+	for (i = 0, p = str;
+	    p < endp && in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p);
+	    ++p, ++i) {
 		struct ratelimit_match *mt = &ent->matches[i];
 		int j;
 
+		BUG_ON(i >= ent_size);
 		mt->addr = addr;
 		mt->ent = ent;
 		++ent->mtcnt;
 		/* there should not be duplications,
-		 * this is also importnat for below test of mtcnt */
+		 * this is also important for below test of mtcnt */
 		for (j = 0; j < i; ++j)
 			if (ent->matches[j].addr == addr) {
 				pr_err("Duplicated IP address %pI4 in list (cmd: %s)\n", &addr, buf);
 				kvfree(ent);
 				return -EINVAL;
 			}
-		if (*p == ' ' || p >= &str[size])
+		if (p >= endp || !*p || *p == ' ')
 			break;
 	}
 	BUG_ON(ent->mtcnt != ent_size);
 
 	/* parse parameters */
-	str = (char *)p;
+	str = (char *)p; /* strip const, also reset 'str' */
 	if (add) /* unindented */
-	for (i = 0; *p; ++i) {
+	for (i = 0; p < endp && *p; ++i) {
 		const char *v;
 		unsigned int val;
 
-		while (*p == ' ')
+		while (p < endp && *p == ' ')
 			++p;
 		v = p;
-		while (*p && *p != ' ')
+		while (p < endp && *p && *p != ' ')
 			++p;
 		if (v == p) {
 			if (i == 0) {
+				/* error if no parameters */
+				pr_err("Add op should have arguments (cmd: %s)\n", buf);
 				kvfree(ent);
 				return -EINVAL;
 			} else
@@ -395,14 +404,14 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 			ent_chk = tent;
 		if (tent != ent_chk) {
 			/* no operation should reference multiple entries */
-			pr_err("IP addresss %pI4 from multiple rules (cmd: %s)\n",
-			   &mt->addr,  buf);
+			pr_err("IP address %pI4 from multiple rules (cmd: %s)\n",
+			    &mt->addr,  buf);
 			goto unlock_einval;
 		}
 	}
 
 	if (add) {
-		/* add op should not reerence any existing entries */
+		/* add op should not reference any existing entries */
 		if (ent_chk) {
 			pr_err("Add op references existing address (cmd: %s)\n", buf);
 			goto unlock_einval;
@@ -447,7 +456,7 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 	struct xt_ratelimit_htable *ht = PDE_DATA(file_inode(file));
 	char *p;
 
-	if (!size)
+	if (!size || !input | !ht)
 		return 0;
 	if (size > sizeof(proc_buf))
 		size = sizeof(proc_buf);
@@ -459,12 +468,15 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 
 		while (p < &proc_buf[size] && *p != '\n')
 			++p;
-		if (*p != '\n') {
-			/* untermianted command */
+		if (p == &proc_buf[size] || *p != '\n') {
+			/* unterminated command */
 			if (str == proc_buf) {
 				pr_err("Rule should end with '\\n'\n");
 				return -EINVAL;
 			} else {
+				/* Rewind to the beginning of incomplete
+				 * command for smarter writers, this doesn't
+				 * help for `cat`, though. */
 				p = str;
 				break;
 			}
