@@ -17,6 +17,13 @@ xt_ratelimit.ko: version.h xt_ratelimit.c xt_ratelimit.h compat.h
 %.so: %_sh.o
 	gcc -shared -o $@ $<
 
+sparse: clean | version.h xt_ratelimit.c xt_ratelimit.h compat.h
+	make -C $(KDIR) M=$(CURDIR) modules C=1
+
+cppcheck:
+	cppcheck -I $(KDIR)/include --enable=all --inconclusive xt_ratelimit.c
+	cppcheck libxt_ratelimit.c
+
 version.h: xt_ratelimit.c xt_ratelimit.h compat.h Makefile
 	@./version.sh --define > version.h
 
@@ -54,4 +61,4 @@ del:
 	-echo -127.0.0.1 1000000 > /proc/net/ipt_ratelimit/dst
 reload: unload load
 
-.PHONY: all minstall linstall install uninstall clean
+.PHONY: all minstall linstall install uninstall clean cppcheck

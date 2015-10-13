@@ -196,7 +196,7 @@ static int ratelimit_seq_show(struct seq_file *s, void *v)
 }
 
 static void *ratelimit_seq_start(struct seq_file *s, loff_t *pos)
-	__acquires(ht->lock)
+	__acquires(&ht->lock)
 {
 	struct xt_ratelimit_htable *ht = s->private;
 	unsigned int *bucket;
@@ -227,7 +227,7 @@ static void *ratelimit_seq_next(struct seq_file *s, void *v, loff_t *pos)
 }
 
 static void ratelimit_seq_stop(struct seq_file *s, void *v)
-	__releases(ht->lock)
+	__releases(&ht->lock)
 {
 	struct xt_ratelimit_htable *ht = s->private;
 	unsigned int *bucket = (unsigned int *)v;
@@ -552,17 +552,6 @@ ratelimit_match_find(const struct xt_ratelimit_htable *ht,
 	}
 	return NULL;
 }
-static struct ratelimit_ent *
-ratelimit_match_find_lock(const struct xt_ratelimit_htable *ht,
-    const __be32 addr)
-	/* under rcu bh */
-{
-	struct ratelimit_ent *ent = ratelimit_match_find(ht, addr);
-
-	if (ent)
-		spin_lock(&ent->lock_bh);
-	return ent;
-}
 
 static struct ratelimit_ent *
 ratelimit_ent_zalloc(int msize)
@@ -733,12 +722,13 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		addr = ip_hdr(skb)->saddr;
 
 	rcu_read_lock();
-	ent = ratelimit_match_find_lock(ht, addr);
+	ent = ratelimit_match_find(ht, addr);
 	if (ent) {
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */
 		const unsigned long delta_ms = (now - car->last) * (MSEC_PER_SEC / HZ);
 
+		spin_lock(&ent->lock_bh);
 		car->tc += len;
 		if (delta_ms) {
 			const u32 tok = delta_ms * (car->cir / (BITS_PER_BYTE * MSEC_PER_SEC));
