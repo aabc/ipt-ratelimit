@@ -108,6 +108,11 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
       # echo -10.0.0.1 > /proc/net/ipt_ratelimit/name0
       # echo -10.0.0.1,10.0.0.2 > /proc/net/ipt_ratelimit/name0
 
+      If you want to always delete before add, but don't want to see deletion
+      error message on console or dmesg, prepend delete command with '@':
+
+      # echo @-10.0.0.1 > /proc/net/ipt_ratelimit/name0
+
     * To flush (clean) set named "name0" (i.e. delete all rules):
 
       # echo / > /proc/net/ipt_ratelimit/name0

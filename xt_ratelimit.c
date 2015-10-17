@@ -273,6 +273,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	int add;
 	int i;
 	int ptok = 0;
+	int warn = 1;
 
 	/* make sure that size is enough for two decrements */
 	if (size < 2 || !str || !ht)
@@ -284,6 +285,13 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	/* rule format is: +address[,address...] [keyword value]...
 	 * address set is unique key for parameters,
 	 * address should not duplicate */
+	if (*str == '@') {
+		warn = 0; /* hide redundant deletion warning */
+		++str;
+		size--;
+	}
+	if (size < 1)
+		return -EINVAL;
 	switch (*str) {
 		case '\n':
 		case '#':
@@ -422,7 +430,8 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		 * should be equal (this is correct, because duplications
 		 * inside of set(s) are impossible) */
 		if (!ent_chk) {
-			pr_err("Del op doesn't reference any existing address (cmd: %s)\n", buf);
+			if (warn)
+				pr_err("Del op doesn't reference any existing address (cmd: %s)\n", buf);
 			goto unlock_einval;
 		}
 		if (ent_chk->mtcnt != ent->mtcnt) {
