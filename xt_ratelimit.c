@@ -272,6 +272,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	int ent_size;
 	int add;
 	int i;
+	int ptok = 0;
 
 	/* make sure that size is enough for two decrements */
 	if (size < 2 || !str || !ht)
@@ -306,7 +307,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	/* determine address set size */
 	ent_size = 0;
 	for (p = str;
-	    p < endp && in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p);
+	    p < endp && *p && (ptok = in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p));
 	    ++p) {
 		++ent_size;
 		if (p >= endp || !*p || *p == ' ')
@@ -316,8 +317,8 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 			return -EINVAL;
 		}
 	}
-	if (!ent_size) {
-		pr_err("Empty IP address list (cmd: %s)\n", buf);
+	if (!ptok || (p < endp && *p && *p != ' ') || !ent_size) {
+		pr_err("Invalid IP address list (cmd: %s)\n", buf);
 		return -EINVAL;
 	}
 
@@ -328,7 +329,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 
 	spin_lock_init(&ent->lock_bh);
 	for (i = 0, p = str;
-	    p < endp && in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p);
+	    p < endp && *p && in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p);
 	    ++p, ++i) {
 		struct ratelimit_match *mt = &ent->matches[i];
 		int j;
