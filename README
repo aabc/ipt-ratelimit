@@ -1,8 +1,8 @@
 ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
    An high-performance implementation of committed access rate, or simply rate
-   limiting, or policing for Linux iptables. Suitable for a lot of users and
-   not have qdisc limitations.
+   limiting, or policing for Linux iptables. Suitable for a lot of users
+   (similar to ipset) and does not have qdisc limitations.
 
 
 ============
@@ -12,8 +12,7 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
   ipt-ratelimit module implements traffic policing (i.e. limiting traffic bit
   rate) using, standard for this purpose, token bucket filter (TBF) algorithm.
   Particular implementation is based on FreeBSD's implementation of Cisco's TBF
-  with extended burst value (which is used to implement RED-like drop
-  behavior).
+  with extended burst value (which is used to implement RED-like drop behavior).
 
   Module is compatible with recent linux distributions such as Debian 7, 8,
   Centos 7, and Linux kernel 3.x or above.
@@ -23,7 +22,7 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 = INSTALLATION =
 ================
 
-  Easy three steps:
+  Three easy steps:
 
   ** 1. Prepare Kernel source for module compilation
 
