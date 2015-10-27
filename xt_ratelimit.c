@@ -185,10 +185,13 @@ static int ratelimit_seq_show(struct seq_file *s, void *v)
 	struct xt_ratelimit_htable *ht = s->private;
 	unsigned int *bucket = (unsigned int *)v;
 	struct ratelimit_match *mt;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
+	struct hlist_node *pos;
+#endif
 
 	/* print everything from the bucket at once */
 	if (!hlist_empty(&ht->hash[*bucket])) {
-		hlist_for_each_entry(mt, &ht->hash[*bucket], node)
+		compat_hlist_for_each_entry(mt, pos, &ht->hash[*bucket], node)
 			if (ratelimit_seq_ent_show(mt, s))
 				return -1;
 	}
@@ -568,8 +571,11 @@ ratelimit_match_find(const struct xt_ratelimit_htable *ht,
 
 	if (!hlist_empty(&ht->hash[hash])) {
 		struct ratelimit_match *mt;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
+		struct hlist_node *pos;
+#endif
 
-		hlist_for_each_entry_rcu(mt, &ht->hash[hash], node)
+		compat_hlist_for_each_entry_rcu(mt, pos, &ht->hash[hash], node)
 			if (mt->addr == addr)
 				return mt->ent;
 	}
@@ -633,9 +639,12 @@ static void htable_cleanup(struct xt_ratelimit_htable *ht)
 	for (i = 0; i < ht->size; i++) {
 		struct ratelimit_match *mt;
 		struct hlist_node *n;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
+		struct hlist_node *pos;
+#endif
 
 		spin_lock(&ht->lock);
-		hlist_for_each_entry_safe(mt, n, &ht->hash[i], node) {
+		compat_hlist_for_each_entry_safe(mt, pos, n, &ht->hash[i], node) {
 			ratelimit_match_free(ht, mt);
 		}
 		spin_unlock(&ht->lock);
@@ -705,8 +714,11 @@ static int htable_get(struct net *net,
 {
 	struct ratelimit_net *ratelimit_net = ratelimit_pernet(net);
 	struct xt_ratelimit_htable *ht;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
+	struct hlist_node *pos;
+#endif
 
-	hlist_for_each_entry(ht, &ratelimit_net->htables, node) {
+	compat_hlist_for_each_entry(ht, pos, &ratelimit_net->htables, node) {
 		if (!strcmp(minfo->name, ht->name)) {
 			ht->use++;
 			minfo->ht = ht;
@@ -841,9 +853,12 @@ static void __net_exit ratelimit_net_exit(struct net *net)
 {
 	struct ratelimit_net *ratelimit_net = ratelimit_pernet(net);
 	struct xt_ratelimit_htable *ht;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
+	struct hlist_node *pos;
+#endif
 
 	mutex_lock(&ratelimit_mutex);
-	hlist_for_each_entry(ht, &ratelimit_net->htables, node)
+	compat_hlist_for_each_entry(ht, pos, &ratelimit_net->htables, node)
 		remove_proc_entry(ht->name, ratelimit_net->ipt_ratelimit);
 	ratelimit_net->ipt_ratelimit = NULL; /* for htable_destroy() */
 	mutex_unlock(&ratelimit_mutex);
