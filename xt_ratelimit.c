@@ -522,7 +522,7 @@ static int htable_create(struct net *net, struct xt_ratelimit_mtinfo *minfo)
 	unsigned int sz; /* (bytes) */
 	int i;
 
-	if (hsize < 0 || hsize > 1000000)
+	if (hsize > 1000000)
 		hsize = 8192;
 
 	sz = sizeof(struct xt_ratelimit_htable) + sizeof(struct hlist_head) * hsize;
