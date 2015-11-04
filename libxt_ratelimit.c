@@ -108,8 +108,7 @@ static void ratelimit_print(const void *ip, const struct xt_entry_match *match,
 	const struct xt_ratelimit_mtinfo *info = (const void *)match->data;
 
 	fputs("ratelimit:", stdout);
-	if (info->name)
-		printf(" set %s", info->name);
+	printf(" set %s", info->name);
 	fputs(" mode ", stdout);
 	print_mode(info->mode);
 }
@@ -118,7 +117,7 @@ static void ratelimit_save(const void *ip, const struct xt_entry_match *match)
 {
 	const struct xt_ratelimit_mtinfo *info = (const void *)match->data;
 
-	if (info->name && strcmp("DEFAULT", info->name))
+	if (strcmp("DEFAULT", info->name))
 		printf(" --ratelimit-set %s", info->name);
 	if (info->mode & XT_RATELIMIT_MODE) {
 		fputs(" --ratelimit-mode ", stdout);
