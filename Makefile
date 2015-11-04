@@ -24,6 +24,9 @@ cppcheck:
 	cppcheck -I $(KDIR)/include --enable=all --inconclusive xt_ratelimit.c
 	cppcheck libxt_ratelimit.c
 
+coverity:
+	coverity-submit -v
+
 version.h: xt_ratelimit.c xt_ratelimit.h compat.h Makefile
 	@./version.sh --define > version.h
 
