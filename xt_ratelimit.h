@@ -31,6 +31,12 @@ enum {
 	XT_RATELIMIT_NAME_LEN	= 32,
 };
 
+enum {
+	OT_ZERO			= 0,
+	OT_MATCH		= 1,
+	OT_HOTDROP		= 2,
+};
+
 struct xt_ratelimit_mtinfo {
 	__u32 mode;
 	char name[XT_RATELIMIT_NAME_LEN];

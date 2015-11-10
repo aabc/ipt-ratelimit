@@ -123,6 +123,24 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
     * To flush (clean) set named "name0" (i.e. delete all rules):
 
       # echo / > /proc/net/ipt_ratelimit/name0
+      or
+      # echo :flush > /proc/net/ipt_ratelimit/name0
+
+    * Change what to do with packets whose IP do not exist in the set
+
+      # echo :hotdrop > /proc/net/ipt_ratelimit/name0
+
+      Use iptables hotdrop to forcefully drop packets directly from
+      te match rule, no matter what is in the -j target.
+
+      # echo :match > /proc/net/ipt_ratelimit/name0
+
+      'Match' these packets (same as if they are exceeding rate limits),
+      thus, -j target will be triggered, which is usually should be DROP.
+
+      # echo :nomatch > /proc/net/ipt_ratelimit/name0
+
+      Disable aforementioned :match or :hotdrop behavior, returning to default.
 
     * To view statistics:
 

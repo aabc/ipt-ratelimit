@@ -124,6 +124,7 @@ struct xt_ratelimit_htable {
 	unsigned int mt_count;		/* currently matches in the hash */
 	unsigned int ent_count;		/* currently entities linked */
 	unsigned int size;		/* hash array size */
+	int other;			/* what to do with 'other' packets */
 	struct net *net;		/* for destruction */
 	struct proc_dir_entry *pde;
 	char name[XT_RATELIMIT_NAME_LEN];
@@ -291,7 +292,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	if (*str == '@') {
 		warn = 0; /* hide redundant deletion warning */
 		++str;
-		size--;
+		--size;
 	}
 	if (size < 1)
 		return -EINVAL;
@@ -301,6 +302,20 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 			return 0;
 		case '/': /* flush table */
 			ratelimit_table_flush(ht);
+			return 0;
+		case ':':
+			++str;
+			--size;
+			if (strcmp(str, "hotdrop") == 0)
+				ht->other = OT_HOTDROP;
+			else if (strcmp(str, "match") == 0)
+				ht->other = OT_MATCH;
+			else if (strcmp(str, "nomatch") == 0)
+				ht->other = OT_ZERO;
+			else if (strcmp(str, "flush") == 0)
+				ratelimit_table_flush(ht);
+			else
+				return -EINVAL;
 			return 0;
 		case '-':
 			add = false;
@@ -797,6 +812,11 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 			ent->stat.green_pkt++;
 		}
 		spin_unlock(&ent->lock_bh);
+	} else {
+		if (ht->other == OT_MATCH)
+			match = true; /* match is drop */
+		else if (ht->other == OT_HOTDROP)
+			par->hotdrop = true;
 	}
 
 	rcu_read_unlock();
