@@ -269,8 +269,8 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	char * const buf = str; /* for logging only */
 	const char *p;
 	const char * const endp = str + size;
-	struct ratelimit_ent *ent;
-	struct ratelimit_ent *ent_chk;
+	struct ratelimit_ent *ent;	/* new entry */
+	struct ratelimit_ent *ent_chk;	/* old entry */
 	__be32 addr;
 	int ent_size;
 	int add;
@@ -424,7 +424,8 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 
 	if (add) {
 		/* add op should not reference any existing entries */
-		if (ent_chk) {
+		/* unless it's update op (which is quiet add) */
+		if (warn && ent_chk) {
 			pr_err("Add op references existing address (cmd: %s)\n", buf);
 			goto unlock_einval;
 		}
@@ -444,8 +445,15 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	}
 
 	if (add) {
-		ratelimit_ent_add(ht, ent);
-		ent = NULL;
+		if (ent_chk) {
+			/* update */
+			spin_lock_bh(&ent_chk->lock_bh);
+			ent_chk->car = ent->car;
+			spin_unlock_bh(&ent_chk->lock_bh);
+		} else {
+			ratelimit_ent_add(ht, ent);
+			ent = NULL;
+		}
 	} else
 		ratelimit_ent_del(ht, ent_chk);
 	spin_unlock(&ht->lock);

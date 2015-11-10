@@ -112,6 +112,14 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
       # echo @-10.0.0.1 > /proc/net/ipt_ratelimit/name0
 
+    * Update rates for existing rules:
+
+      # echo @+10.0.0.1 0 > /proc/net/ipt_ratelimit/name0
+
+      With this, if rule is not already exists then it will be added,
+      if it's already exists then rate will be updated (with zero rate in
+      example). Note, that IP list should match existing rule exactly.
+
     * To flush (clean) set named "name0" (i.e. delete all rules):
 
       # echo / > /proc/net/ipt_ratelimit/name0
