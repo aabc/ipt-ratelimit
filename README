@@ -130,7 +130,7 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
     * Stat output example and format:
 
-    10.0.1.5 cir 1000000 cbs 187500 ebs 375000; tc 0 te 0 last never; conf 0/0 0 bps, rej 0/0 0 bps
+    10.0.1.5 cir 1000000 cbs 187500 ebs 375000; tc 0 te 0 last never; conf 0/0 0 bps, rej 0/0
 
       10.0.1.5     IP to match,
       cir 1000000  allowed rate   (cir is committed information rate) in bits,
@@ -141,9 +141,9 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
       last never   how much seconds ago last packet is seen,
       conf 0/0 0 bps
                    conforming traffic counters (pkts/bytes bitrate),
-		   Note, that bitrate here is calculated from the first seen to
-		   the last seen packet, not to the 'now'.
-      rej 0/0 0 bps
+		   Note, that bps here is average bit rate estimation calculated
+		   for last several seconds.
+      rej 0/0
                    rejected (or matched) traffic counters.
 
 

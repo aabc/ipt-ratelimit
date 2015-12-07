@@ -56,6 +56,8 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION(XT_RATELIMIT_VERSION);
 MODULE_ALIAS("ipt_ratelimit");
 
+#define RATE_ESTIMATOR			/* average rate estimator */
+
 static unsigned int hashsize __read_mostly = 10000;
 module_param(hashsize, uint, 0400);
 MODULE_PARM_DESC(hashsize, "default size of hash table used to look up IPs");
@@ -92,6 +94,14 @@ struct ratelimit_stat {
 	u32 green_pkt;
 	u32 red_pkt;
 	unsigned long first;		/* first time seen */
+
+#ifdef RATE_ESTIMATOR
+#define RATEST_SECONDS 4		/* length of rate estimator time slot */
+#define RATEST_JIFFIES (HZ * RATEST_SECONDS)
+	u64 cur_s_bytes;		/* accumulator at current time slot */
+	u64 prev_s_bytes;		/* accumulator at previous slot */
+	unsigned int est_slot;		/* current time slot */
+#endif
 };
 
 /* hash bucket entity */
@@ -138,6 +148,35 @@ static inline struct ratelimit_net *ratelimit_pernet(struct net *net)
         return net_generic(net, ratelimit_net_id);
 }
 
+#ifdef RATE_ESTIMATOR
+unsigned long calc_rate_est(const struct ratelimit_stat *stat)
+{
+	const unsigned long now = jiffies;
+	const unsigned int est_slot = now / RATEST_JIFFIES;
+	unsigned long bps;
+	unsigned long cur_bytes = 0;
+
+	/* init 'bps' to previous slot bytes size */
+	if (est_slot == stat->est_slot) {
+		bps = stat->prev_s_bytes;
+		cur_bytes = stat->cur_s_bytes;
+	} else if ((est_slot - 1) == stat->est_slot)
+		bps = stat->cur_s_bytes;
+	else
+		return 0;
+
+	{
+		const unsigned int slot_delta_rtime = RATEST_JIFFIES - (now % RATEST_JIFFIES);
+#define SMOOTH_VAUE 10 /* smoothen integer arithmetics */
+		const unsigned int prev_ratio = (slot_delta_rtime)?
+			RATEST_JIFFIES * SMOOTH_VAUE / slot_delta_rtime : SMOOTH_VAUE;
+
+		bps = bps * SMOOTH_VAUE / prev_ratio;
+		bps += cur_bytes;
+		return bps * BITS_PER_BYTE / RATEST_SECONDS;
+	}
+}
+#endif
 #define SAFEDIV(x,y) ((y)? ({ u64 __tmp = x; do_div(__tmp, y); (unsigned int)__tmp; }) : 0)
 
 static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
@@ -167,13 +206,15 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	else
 		seq_printf(s, " never;");
 
-	seq_printf(s, " conf %u/%llu %u bps, rej %u/%llu %u bps",
-	    ent->stat.green_pkt, ent->stat.green_bytes,
-	    SAFEDIV(ent->stat.green_bytes * 8,
-		    (ent->car.last - ent->stat.first) / HZ),
-	    ent->stat.red_pkt, ent->stat.red_bytes,
-	    SAFEDIV(ent->stat.red_bytes * 8,
-		    (ent->car.last - ent->stat.first) / HZ));
+	seq_printf(s, " conf %u/%llu",
+	    ent->stat.green_pkt, ent->stat.green_bytes);
+
+#ifdef RATE_ESTIMATOR
+	seq_printf(s, " %lu bps", calc_rate_est(&ent->stat));
+#endif
+
+	seq_printf(s, ", rej %u/%llu",
+	    ent->stat.red_pkt, ent->stat.red_bytes);
 
 	seq_printf(s, "\n");
 
@@ -762,6 +803,22 @@ static void htable_put(struct xt_ratelimit_htable *ht)
 	}
 }
 
+#ifdef RATE_ESTIMATOR
+void rate_estimator(struct ratelimit_stat *stat, const unsigned int est_slot, const unsigned int bytes) {
+	if (likely(stat->est_slot == est_slot)) {
+		/* while we are in 'current time slot' increment traffic counter */
+		stat->cur_s_bytes += bytes;
+	} else { /* new time slot */
+		if (stat->est_slot == (est_slot - 1)) /* adjacent slot */
+			stat->prev_s_bytes = stat->cur_s_bytes;
+		else
+			stat->prev_s_bytes = 0;
+		stat->cur_s_bytes = 0;
+		stat->est_slot = est_slot;
+	}
+}
+#endif
+
 /* match the packet */
 static bool
 ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
@@ -810,6 +867,9 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		} else {
 			ent->stat.green_bytes += len;
 			ent->stat.green_pkt++;
+#ifdef RATE_ESTIMATOR
+			rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
+#endif
 		}
 		spin_unlock(&ent->lock_bh);
 	} else {
