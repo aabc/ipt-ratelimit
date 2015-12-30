@@ -68,9 +68,9 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
   Both options are mandatory. Every set should be first created with iptables
   before it will have configuration file /proc/net/ipt_ratelimit/<name>
 
-  * To create set named "name0":
+  * To create set named "name0", for example:
 
-    # iptables --ratelimit-set name0 --ratelimit-mode src -j DROP
+    # iptables -A FORWARD -m ratelimit --ratelimit-set name0 --ratelimit-mode src -j DROP
 
   This command will work like this:
    - match src (source) IP address of every packet in the set name0,
