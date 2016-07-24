@@ -18,8 +18,6 @@
  *
  */
 
-#define _BSD_SOURCE 1
-#define _ISOC99_SOURCE 1
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

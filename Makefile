@@ -2,6 +2,7 @@ KVER   ?= $(shell uname -r)
 KDIR   ?= /lib/modules/$(KVER)/build/
 DEPMOD  = /sbin/depmod -a
 CC     ?= gcc
+XFLAGS ?= $(shell pkg-config xtables --cflags 2>/dev/null)
 obj-m   = xt_ratelimit.o
 CFLAGS_xt_ratelimit.o := -DDEBUG
 
@@ -12,7 +13,7 @@ xt_ratelimit.ko: version.h xt_ratelimit.c xt_ratelimit.h compat.h
 	-sync
 
 %_sh.o: libxt_ratelimit.c xt_ratelimit.h
-	gcc -O2 -Wall -Wunused -fPIC -o $@ -c $<$
+	gcc -O2 -Wall -Wunused -fPIC ${XFLAGS} ${CFLAGS} -o $@ -c $<
 
 %.so: %_sh.o
 	gcc -shared -o $@ $<
