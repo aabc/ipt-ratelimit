@@ -85,15 +85,14 @@ struct ratelimit_car {
 
 	u32 cbs;			/* committed burst size (bytes) */
 	u32 ebs;			/* extended burst size (bytes) */
-	u32 cir;			/* committed information rate (bits/s) */
+	u32 cir;			/* committed information rate (bits/s) / (HZ * 8) */
 };
 
 struct ratelimit_stat {
-	u64 green_bytes;
-	u64 red_bytes;
-	u32 green_pkt;
-	u32 red_pkt;
-	unsigned long first;		/* first time seen */
+	atomic64_t green_bytes;
+	atomic64_t red_bytes;
+	atomic_t green_pkt;
+	atomic_t red_pkt;
 
 #ifdef RATE_ESTIMATOR
 #define RATEST_SECONDS 4		/* length of rate estimator time slot */
@@ -198,7 +197,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 		    &ent->matches[i].addr);
 	}
 	seq_printf(s, " cir %u cbs %u ebs %u;",
-	    ent->car.cir, ent->car.cbs, ent->car.ebs);
+	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
 
 	seq_printf(s, " tc %u te %u last", ent->car.tc, ent->car.te);
 	if (ent->car.last)
@@ -207,14 +206,16 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 		seq_printf(s, " never;");
 
 	seq_printf(s, " conf %u/%llu",
-	    ent->stat.green_pkt, ent->stat.green_bytes);
+	    (u32)atomic_read(&ent->stat.green_pkt),
+		 (u64)atomic64_read(&ent->stat.green_bytes));
 
 #ifdef RATE_ESTIMATOR
 	seq_printf(s, " %lu bps", calc_rate_est(&ent->stat));
 #endif
 
 	seq_printf(s, ", rej %u/%llu",
-	    ent->stat.red_pkt, ent->stat.red_bytes);
+	    (u32)atomic_read(&ent->stat.red_pkt),
+		 (u64)atomic64_read(&ent->stat.red_bytes));
 
 	seq_printf(s, "\n");
 
@@ -442,7 +443,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		val = simple_strtoul(v, NULL, 10);
 		switch (i) {
 			case 0:
-				ent->car.cir = val;
+				ent->car.cir = val / (HZ * BITS_PER_BYTE);
 				/* autoconfigure optimal parameters */
 				val = val / 8 + (val / 8 / 2);
 				/* FALLTHROUGH */
@@ -841,37 +842,37 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	if (ent) {
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */
-		const unsigned long delta_ms = (now - car->last) * (MSEC_PER_SEC / HZ);
+		const u32 tok = (now - car->last) * car->cir;
 
 		spin_lock(&ent->lock_bh);
 		car->tc += len;
-		if (delta_ms) {
-			const u32 tok = delta_ms * (car->cir / (BITS_PER_BYTE * MSEC_PER_SEC));
-
+		if (tok) {
 			car->tc -= min(tok, car->tc);
-			if (!ent->stat.first)
-				ent->stat.first = now;
 			car->last = now;
 		}
 		if (car->tc > car->cbs) { /* extended burst */
 			car->te += car->tc - car->cbs;
 			if (car->te > car->ebs) {
 				car->te = 0;
+				car->tc -= len;
 				match = true; /* match is drop */
 			}
 		}
-		if (match) {
-			ent->stat.red_bytes += len;
-			ent->stat.red_pkt++;
-			car->tc -= len;
-		} else {
-			ent->stat.green_bytes += len;
-			ent->stat.green_pkt++;
+
 #ifdef RATE_ESTIMATOR
+		if (!match) {
 			rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
-#endif
 		}
+#endif
 		spin_unlock(&ent->lock_bh);
+
+		if (match) {
+			atomic64_add(len, &ent->stat.red_bytes);
+			atomic_inc(&ent->stat.red_pkt);
+		} else {
+			atomic64_add(len, &ent->stat.green_bytes);
+			atomic_inc(&ent->stat.green_pkt);
+		}
 	} else {
 		if (ht->other == OT_MATCH)
 			match = true; /* match is drop */
