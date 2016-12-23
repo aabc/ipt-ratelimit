@@ -80,7 +80,7 @@ struct ratelimit_net {
 /* CAR accounting */
 struct ratelimit_car {
 	unsigned long last;		/* last refill (jiffies) */
-	u32 tc;				/* committed token bucket counter */
+	atomic_t tc;				/* committed token bucket counter */
 	u32 te;				/* exceeded token bucket counter */
 
 	u32 cbs;			/* committed burst size (bytes) */
@@ -199,7 +199,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	seq_printf(s, " cir %u cbs %u ebs %u;",
 	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
 
-	seq_printf(s, " tc %u te %u last", ent->car.tc, ent->car.te);
+	seq_printf(s, " tc %u te %u last", (u32)atomic_read(&ent->car.tc), ent->car.te);
 	if (ent->car.last)
 		seq_printf(s, " %ld;", jiffies - ent->car.last);
 	else
@@ -839,34 +839,40 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 
 	rcu_read_lock();
 	ent = ratelimit_match_find(ht, addr);
-	if (ent) {
+	if (likely(ent)) {
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */
-		const u32 tok = (now - car->last) * car->cir;
 
-		spin_lock(&ent->lock_bh);
-		car->tc += len;
-		if (tok) {
-			car->tc -= min(tok, car->tc);
-			car->last = now;
-		}
-		if (car->tc > car->cbs) { /* extended burst */
-			car->te += car->tc - car->cbs;
-			if (car->te > car->ebs) {
-				car->te = 0;
-				car->tc -= len;
-				match = true; /* match is drop */
+		atomic_add(len, &car->tc);
+
+		if (unlikely((u32)atomic_read(&car->tc) > car->cbs)) {
+			u32 tc;
+			const u32 tok = (now - car->last) * car->cir;
+			spin_lock(&ent->lock_bh);
+
+			if (likely(tok)) {
+				atomic_sub(min(tok, (u32)atomic_read(&car->tc)), &car->tc);
+				car->last = now;
 			}
-		}
 
+			tc = (u32)atomic_read(&car->tc);
+			if (tc > car->cbs) { /* extended burst */
+				car->te += tc - car->cbs;
+				if (car->te > car->ebs) {
+					car->te = 0;
+					atomic_sub(len, &car->tc);
+					match = true; /* match is drop */
+				}
+			}
 #ifdef RATE_ESTIMATOR
-		if (!match) {
-			rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
-		}
+			if (!match) {
+				rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
+			}
 #endif
-		spin_unlock(&ent->lock_bh);
+			spin_unlock(&ent->lock_bh);
+		}
 
-		if (match) {
+		if (likely(match)) {
 			atomic64_add(len, &ent->stat.red_bytes);
 			atomic_inc(&ent->stat.red_pkt);
 		} else {
