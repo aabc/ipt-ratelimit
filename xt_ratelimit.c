@@ -85,7 +85,7 @@ struct ratelimit_car {
 
 	u32 cbs;			/* committed burst size (bytes) */
 	u32 ebs;			/* extended burst size (bytes) */
-	u32 cir_hz;   /* committed information rate (bits/s) / (HZ * 8) */
+	u32 cir;			/* committed information rate (bits/s) / (HZ * 8) */
 };
 
 struct ratelimit_stat {
@@ -197,7 +197,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 		    &ent->matches[i].addr);
 	}
 	seq_printf(s, " cir %u cbs %u ebs %u;",
-	    ent->car.cir_hz * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
+	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
 
 	seq_printf(s, " tc %u te %u last", ent->car.tc, ent->car.te);
 	if (ent->car.last)
@@ -443,7 +443,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		val = simple_strtoul(v, NULL, 10);
 		switch (i) {
 			case 0:
-				ent->car.cir_hz = val / (HZ * BITS_PER_BYTE);
+				ent->car.cir = val / (HZ * BITS_PER_BYTE);
 				/* autoconfigure optimal parameters */
 				val = val / 8 + (val / 8 / 2);
 				/* FALLTHROUGH */
@@ -842,7 +842,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	if (ent) {
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */
-		const u32 tok = (now - car->last) * car->cir_hz;
+		const u32 tok = (now - car->last) * car->cir;
 
 		spin_lock(&ent->lock_bh);
 		car->tc += len;
@@ -858,9 +858,13 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 				match = true; /* match is drop */
 			}
 		}
-#ifndef RATE_ESTIMATOR
-		spin_unlock(&ent->lock_bh);
+
+#ifdef RATE_ESTIMATOR
+		if (!match) {
+			rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
+		}
 #endif
+		spin_unlock(&ent->lock_bh);
 
 		if (match) {
 			atomic64_add(len, &ent->stat.red_bytes);
@@ -868,14 +872,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		} else {
 			atomic64_add(len, &ent->stat.green_bytes);
 			atomic_inc(&ent->stat.green_pkt);
-#ifdef RATE_ESTIMATOR
-			rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
-#endif
 		}
-
-#ifdef RATE_ESTIMATOR
-		spin_unlock(&ent->lock_bh);
-#endif
 	} else {
 		if (ht->other == OT_MATCH)
 			match = true; /* match is drop */
