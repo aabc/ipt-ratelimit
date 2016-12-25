@@ -42,6 +42,7 @@
 #include <linux/version.h>
 #include "compat.h"
 #include "xt_ratelimit.h"
+#include <linux/rwlock_types.h>
 
 #define XT_RATELIMIT_VERSION "0.2"
 #include "version.h"
@@ -80,20 +81,19 @@ struct ratelimit_net {
 /* CAR accounting */
 struct ratelimit_car {
 	unsigned long last;		/* last refill (jiffies) */
-	u32 tc;				/* committed token bucket counter */
+	atomic_t tc;				/* committed token bucket counter */
 	u32 te;				/* exceeded token bucket counter */
 
 	u32 cbs;			/* committed burst size (bytes) */
 	u32 ebs;			/* extended burst size (bytes) */
-	u32 cir;			/* committed information rate (bits/s) */
+	u32 cir;			/* committed information rate (bits/s) / (HZ * 8) */
 };
 
 struct ratelimit_stat {
-	u64 green_bytes;
-	u64 red_bytes;
-	u32 green_pkt;
-	u32 red_pkt;
-	unsigned long first;		/* first time seen */
+	atomic64_t green_bytes;
+	atomic64_t red_bytes;
+	atomic_t green_pkt;
+	atomic_t red_pkt;
 
 #ifdef RATE_ESTIMATOR
 #define RATEST_SECONDS 4		/* length of rate estimator time slot */
@@ -117,7 +117,7 @@ struct ratelimit_ent {
 	int mtcnt;			/* size of matches[mtcnt] */
 	struct ratelimit_stat stat;
 	struct ratelimit_car car;
-	spinlock_t lock_bh;
+	rwlock_t lock_bh;
 
 		/* variable sized array for actual hash entries, it's
 		 * to optimize memory allocation and data locality
@@ -191,34 +191,36 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 		return 0;
 
 	/* lock for consistent reads from the counters */
-	spin_lock_bh(&ent->lock_bh);
+	write_lock_bh(&ent->lock_bh);
 	for (i = 0; i < ent->mtcnt; i++) {
 		seq_printf(s, "%s%pI4",
 		    i == 0? "" : ",",
 		    &ent->matches[i].addr);
 	}
 	seq_printf(s, " cir %u cbs %u ebs %u;",
-	    ent->car.cir, ent->car.cbs, ent->car.ebs);
+	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
 
-	seq_printf(s, " tc %u te %u last", ent->car.tc, ent->car.te);
+	seq_printf(s, " tc %u te %u last", (u32)atomic_read(&ent->car.tc), ent->car.te);
 	if (ent->car.last)
 		seq_printf(s, " %ld;", jiffies - ent->car.last);
 	else
 		seq_printf(s, " never;");
 
 	seq_printf(s, " conf %u/%llu",
-	    ent->stat.green_pkt, ent->stat.green_bytes);
+	    (u32)atomic_read(&ent->stat.green_pkt),
+		 (u64)atomic64_read(&ent->stat.green_bytes));
 
 #ifdef RATE_ESTIMATOR
 	seq_printf(s, " %lu bps", calc_rate_est(&ent->stat));
 #endif
 
 	seq_printf(s, ", rej %u/%llu",
-	    ent->stat.red_pkt, ent->stat.red_bytes);
+	    (u32)atomic_read(&ent->stat.red_pkt),
+		 (u64)atomic64_read(&ent->stat.red_bytes));
 
 	seq_printf(s, "\n");
 
-	spin_unlock_bh(&ent->lock_bh);
+	write_unlock_bh(&ent->lock_bh);
 	return seq_has_overflowed(s);
 }
 
@@ -394,7 +396,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	if (!ent)
 		return -ENOMEM;
 
-	spin_lock_init(&ent->lock_bh);
+	rwlock_init(&ent->lock_bh);
 	for (i = 0, p = str;
 	    p < endp && *p && in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p);
 	    ++p, ++i) {
@@ -442,7 +444,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		val = simple_strtoul(v, NULL, 10);
 		switch (i) {
 			case 0:
-				ent->car.cir = val;
+				ent->car.cir = val / (HZ * BITS_PER_BYTE);
 				/* autoconfigure optimal parameters */
 				val = val / 8 + (val / 8 / 2);
 				/* FALLTHROUGH */
@@ -503,9 +505,9 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	if (add) {
 		if (ent_chk) {
 			/* update */
-			spin_lock_bh(&ent_chk->lock_bh);
+			write_lock_bh(&ent_chk->lock_bh);
 			ent_chk->car = ent->car;
-			spin_unlock_bh(&ent_chk->lock_bh);
+			write_unlock_bh(&ent_chk->lock_bh);
 		} else {
 			ratelimit_ent_add(ht, ent);
 			ent = NULL;
@@ -830,6 +832,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	const unsigned long now = jiffies;
 	__be32 addr;
 	int match = false; /* no match, no drop */
+	int slow_path = false;
 
 	if (mtinfo->mode & XT_RATELIMIT_DST)
 		addr = ip_hdr(skb)->daddr;
@@ -838,40 +841,76 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 
 	rcu_read_lock();
 	ent = ratelimit_match_find(ht, addr);
-	if (ent) {
+	if (likely(ent)) {
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */
-		const unsigned long delta_ms = (now - car->last) * (MSEC_PER_SEC / HZ);
+		u32 tc, new_tc, tok;
 
-		spin_lock(&ent->lock_bh);
-		car->tc += len;
-		if (delta_ms) {
-			const u32 tok = delta_ms * (car->cir / (BITS_PER_BYTE * MSEC_PER_SEC));
+		/* try a fast path first */
+		read_lock(&ent->lock_bh);
+		while (1) { /* cas loop */
+			tc = (u32) atomic_read(&car->tc);
+			new_tc = tc + len;
 
-			car->tc -= min(tok, car->tc);
-			if (!ent->stat.first)
-				ent->stat.first = now;
-			car->last = now;
-		}
-		if (car->tc > car->cbs) { /* extended burst */
-			car->te += car->tc - car->cbs;
-			if (car->te > car->ebs) {
-				car->te = 0;
-				match = true; /* match is drop */
+			/* is there are enough tokens in the bucket to pass a packet? */
+			if (likely(new_tc <= car->cbs)) {
+				if (atomic_cmpxchg(&car->tc, tc, new_tc)) {
+					/* success, no concurrent updates */
+					break;
+				}
+				/* CAS failed, the bucket was updated by another thread,
+				 * try one more time
+				 */
+			}
+			else {
+				/* not enough tokens, we have to take a slow path */
+				slow_path = 1;
+				break;
 			}
 		}
-		if (match) {
-			ent->stat.red_bytes += len;
-			ent->stat.red_pkt++;
-			car->tc -= len;
-		} else {
-			ent->stat.green_bytes += len;
-			ent->stat.green_pkt++;
+		read_unlock(&ent->lock_bh);
+
+		if (unlikely(slow_path)) {
+			write_lock(&ent->lock_bh);
+
+			/* read tc */
+			tc = (u32) atomic_read(&car->tc);
+			tc += len;
+
+			/* tok to add */
+			tok = (now - car->last) * car->cir;
+			if (tok) {
+				tc -= min(tok, tc);
+				car->last = now;
+			}
+
+			if (tc > car->cbs) { /* extended burst */
+				car->te += tc - car->cbs;
+				if (car->te > car->ebs) {
+					car->te = 0;
+					tc -= len;
+					match = true; /* match is drop */
+				}
+			}
+			/* store tc */
+			atomic_set(&car->tc, tc);
+
 #ifdef RATE_ESTIMATOR
-			rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
+			if (!match) {
+				rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
+			}
 #endif
+			write_unlock(&ent->lock_bh);
 		}
-		spin_unlock(&ent->lock_bh);
+
+		if (likely(match)) {
+			atomic64_add(len, &ent->stat.red_bytes);
+			atomic_inc(&ent->stat.red_pkt);
+		}
+		else {
+			atomic64_add(len, &ent->stat.green_bytes);
+			atomic_inc(&ent->stat.green_pkt);
+		}
 	} else {
 		if (ht->other == OT_MATCH)
 			match = true; /* match is drop */
