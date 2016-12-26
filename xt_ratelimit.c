@@ -842,9 +842,10 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	if (ent) {
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */
-		const u32 tok = (now - car->last) * car->cir;
+		u32 tok;
 
 		spin_lock(&ent->lock_bh);
+		tok = (now - car->last) * car->cir;
 		car->tc += len;
 		if (tok) {
 			car->tc -= min(tok, car->tc);
