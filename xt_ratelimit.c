@@ -42,7 +42,6 @@
 #include <linux/version.h>
 #include "compat.h"
 #include "xt_ratelimit.h"
-#include <linux/rwlock_types.h>
 
 #define XT_RATELIMIT_VERSION "0.2"
 #include "version.h"
@@ -78,11 +77,22 @@ struct ratelimit_net {
         struct proc_dir_entry	*ipt_ratelimit;
 };
 
+typedef union {
+	struct {
+		u32 tc;
+		u32 te;
+	} flds;
+	long long_v;
+}
+tce_t;
+
 /* CAR accounting */
 struct ratelimit_car {
 	unsigned long last;		/* last refill (jiffies) */
-	atomic_t tc;				/* committed token bucket counter */
-	u32 te;				/* exceeded token bucket counter */
+
+	/* committed token bucket counter */
+	/* exceeded token bucket counter */
+	tce_t tce;
 
 	u32 cbs;			/* committed burst size (bytes) */
 	u32 ebs;			/* extended burst size (bytes) */
@@ -117,7 +127,7 @@ struct ratelimit_ent {
 	int mtcnt;			/* size of matches[mtcnt] */
 	struct ratelimit_stat stat;
 	struct ratelimit_car car;
-	rwlock_t lock_bh;
+	spinlock_t lock_bh;
 
 		/* variable sized array for actual hash entries, it's
 		 * to optimize memory allocation and data locality
@@ -191,7 +201,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 		return 0;
 
 	/* lock for consistent reads from the counters */
-	write_lock_bh(&ent->lock_bh);
+	spin_lock_bh(&ent->lock_bh);
 	for (i = 0; i < ent->mtcnt; i++) {
 		seq_printf(s, "%s%pI4",
 		    i == 0? "" : ",",
@@ -200,7 +210,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	seq_printf(s, " cir %u cbs %u ebs %u;",
 	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
 
-	seq_printf(s, " tc %u te %u last", (u32)atomic_read(&ent->car.tc), ent->car.te);
+	seq_printf(s, " tc %u te %u last", ent->car.tce.flds.tc, ent->car.tce.flds.te);
 	if (ent->car.last)
 		seq_printf(s, " %ld;", jiffies - ent->car.last);
 	else
@@ -220,7 +230,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 
 	seq_printf(s, "\n");
 
-	write_unlock_bh(&ent->lock_bh);
+	spin_unlock_bh(&ent->lock_bh);
 	return seq_has_overflowed(s);
 }
 
@@ -396,7 +406,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	if (!ent)
 		return -ENOMEM;
 
-	rwlock_init(&ent->lock_bh);
+	spin_lock_init(&ent->lock_bh);
 	for (i = 0, p = str;
 	    p < endp && *p && in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p);
 	    ++p, ++i) {
@@ -505,9 +515,9 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	if (add) {
 		if (ent_chk) {
 			/* update */
-			write_lock_bh(&ent_chk->lock_bh);
+			spin_lock_bh(&ent_chk->lock_bh);
 			ent_chk->car = ent->car;
-			write_unlock_bh(&ent_chk->lock_bh);
+			spin_unlock_bh(&ent_chk->lock_bh);
 		} else {
 			ratelimit_ent_add(ht, ent);
 			ent = NULL;
@@ -832,7 +842,6 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	const unsigned long now = jiffies;
 	__be32 addr;
 	int match = false; /* no match, no drop */
-	int slow_path = false;
 
 	if (mtinfo->mode & XT_RATELIMIT_DST)
 		addr = ip_hdr(skb)->daddr;
@@ -841,73 +850,66 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 
 	rcu_read_lock();
 	ent = ratelimit_match_find(ht, addr);
-	if (likely(ent)) {
+	if (ent) {
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */
-		u32 tc, new_tc, tok;
 
-		/* try a fast path first */
-		read_lock(&ent->lock_bh);
-		while (1) { /* cas loop */
-			tc = (u32) atomic_read(&car->tc);
-			new_tc = tc + len;
+		unsigned long time_passed, last, old;
+		u32 tc, te, tok;
+		tce_t tce, new_tce;
+		long old_tce;
 
-			/* is there are enough tokens in the bucket to pass a packet? */
-			if (likely(new_tc <= car->cbs)) {
-				if (atomic_cmpxchg(&car->tc, tc, new_tc)) {
-					/* success, no concurrent updates */
-					break;
-				}
-				/* CAS failed, the bucket was updated by another thread,
-				 * try one more time
-				 */
-			}
-			else {
-				/* not enough tokens, we have to take a slow path */
-				slow_path = 1;
-				break;
+		/*
+		 * calculate how much time has passed since the last update
+		 * and then update last update time
+		 */
+		while (true) { /* cas loop */
+			last = car->last;
+			time_passed = now - last;
+			old = atomic64_cmpxchg((atomic64_t*) &car->last, last, now);
+			if (old == last) {
+				break; /* success */
 			}
 		}
-		read_unlock(&ent->lock_bh);
 
-		if (unlikely(slow_path)) {
-			write_lock(&ent->lock_bh);
+		/*
+		 * process packet's bytes
+		 */
+		while (true) { /* cas loop */
+			tce = car->tce;
+			tc = tce.flds.tc;
+			te = tce.flds.te;
 
-			/* read tc */
-			tc = (u32) atomic_read(&car->tc);
 			tc += len;
 
-			/* tok to add */
-			tok = (now - car->last) * car->cir;
-			if (tok) {
+			if (time_passed) {
+				tok = time_passed * car->cir;
 				tc -= min(tok, tc);
-				car->last = now;
 			}
 
 			if (tc > car->cbs) { /* extended burst */
-				car->te += tc - car->cbs;
-				if (car->te > car->ebs) {
-					car->te = 0;
+				te += tc - car->cbs;
+				if (te > car->ebs) {
+					te = 0;
 					tc -= len;
-					match = true; /* match is drop */
+					match = true; /* drop */
 				}
 			}
-			/* store tc */
-			atomic_set(&car->tc, tc);
 
-#ifdef RATE_ESTIMATOR
-			if (!match) {
-				rate_estimator(&ent->stat, now / RATEST_JIFFIES, len);
+			/* new tce */
+			new_tce.flds.tc = tc;
+			new_tce.flds.te = te;
+			old_tce = atomic64_cmpxchg((atomic64_t*) &car->tce.long_v, tce.long_v,
+					  new_tce.long_v);
+			if (old_tce == tce.long_v) {
+				break; /* success */
 			}
-#endif
-			write_unlock(&ent->lock_bh);
 		}
 
 		if (likely(match)) {
 			atomic64_add(len, &ent->stat.red_bytes);
 			atomic_inc(&ent->stat.red_pkt);
-		}
-		else {
+		} else {
 			atomic64_add(len, &ent->stat.green_bytes);
 			atomic_inc(&ent->stat.green_pkt);
 		}
