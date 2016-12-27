@@ -92,7 +92,7 @@ struct ratelimit_car {
 
 	/* committed token bucket counter */
 	/* exceeded token bucket counter */
-	tce_t tce;
+	atomic64_t tce;
 
 	u32 cbs;			/* committed burst size (bytes) */
 	u32 ebs;			/* extended burst size (bytes) */
@@ -195,6 +195,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	struct ratelimit_ent *ent = mt->ent;
 	int i;
 	unsigned long last;
+	tce_t tce;
 
 	/* to print entities only once, we print only entities
 	 * where match is first element */
@@ -211,7 +212,9 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	seq_printf(s, " cir %u cbs %u ebs %u;",
 	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
 
-	seq_printf(s, " tc %u te %u last", ent->car.tce.flds.tc, ent->car.tce.flds.te);
+	tce.long_v = atomic64_read(&ent->car.tce);
+	seq_printf(s, " tc %u te %u last", tce.flds.tc, tce.flds.te);
+
 	last = atomic64_read(&ent->car.last);
 	if (last)
 		seq_printf(s, " %ld;", jiffies - last);
@@ -878,7 +881,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		 * process packet's bytes
 		 */
 		while (true) { /* cas loop */
-			tce = car->tce;
+			tce.long_v = atomic64_read(&car->tce);
 			tc = tce.flds.tc;
 			te = tce.flds.te;
 			match = false;
@@ -902,8 +905,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 			/* new tce */
 			new_tce.flds.tc = tc;
 			new_tce.flds.te = te;
-			old_tce = atomic64_cmpxchg((atomic64_t*) &car->tce.long_v, tce.long_v,
-					  new_tce.long_v);
+			old_tce = atomic64_cmpxchg(&car->tce, tce.long_v, new_tce.long_v);
 			if (old_tce == tce.long_v) {
 				break; /* success */
 			}
