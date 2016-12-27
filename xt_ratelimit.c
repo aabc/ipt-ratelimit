@@ -88,7 +88,7 @@ tce_t;
 
 /* CAR accounting */
 struct ratelimit_car {
-	unsigned long last;		/* last refill (jiffies) */
+	atomic64_t last;		/* last refill (jiffies) */
 
 	/* committed token bucket counter */
 	/* exceeded token bucket counter */
@@ -194,6 +194,7 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 {
 	struct ratelimit_ent *ent = mt->ent;
 	int i;
+	unsigned long last;
 
 	/* to print entities only once, we print only entities
 	 * where match is first element */
@@ -211,8 +212,9 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
 
 	seq_printf(s, " tc %u te %u last", ent->car.tce.flds.tc, ent->car.tce.flds.te);
-	if (ent->car.last)
-		seq_printf(s, " %ld;", jiffies - ent->car.last);
+	last = atomic64_read(&ent->car.last);
+	if (last)
+		seq_printf(s, " %ld;", jiffies - last);
 	else
 		seq_printf(s, " never;");
 
@@ -854,7 +856,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */
 
-		unsigned long time_passed, last, old;
+		unsigned long time_passed, old, last;
 		u32 tc, te, tok;
 		tce_t tce, new_tce;
 		long old_tce;
@@ -864,9 +866,9 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		 * and then update last update time
 		 */
 		while (true) { /* cas loop */
-			last = car->last;
+			last = atomic64_read(&car->last);
 			time_passed = now - last;
-			old = atomic64_cmpxchg((atomic64_t*) &car->last, last, now);
+			old = atomic64_cmpxchg(&car->last, last, now);
 			if (old == last) {
 				break; /* success */
 			}
