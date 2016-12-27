@@ -843,7 +843,7 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	struct ratelimit_ent *ent;
 	const unsigned long now = jiffies;
 	__be32 addr;
-	int match; /* no match, no drop */
+	int match = false; /* no match, no drop */
 
 	if (mtinfo->mode & XT_RATELIMIT_DST)
 		addr = ip_hdr(skb)->daddr;
