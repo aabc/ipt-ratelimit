@@ -1,4 +1,5 @@
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,19,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,19,0) && \
+	!(defined(RHEL_MAJOR) && RHEL_MAJOR == 7 && RHEL_MINOR > 2)
 static inline bool seq_has_overflowed(struct seq_file *m)
 {
 	return m->count == m->size;
