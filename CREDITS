@@ -49,8 +49,14 @@ Principal author and project maintainer:
 
 
 xt_hashlimit and xt_recent implementation from Linux Kernel is used for
-reference, also, compatibility layer is using code from Linux Kernel and should
-be attributed to respective Linux developers.
+   reference, also, compatibility layer is using code from Linux Kernel and
+   should be attributed to respective Linux developers.
+
+
+Code and patch contributors:
+
+   Igor Diakonov [2015]
+   Alexander Kiselev [2017]
 
 
 Project supporters and sponsors:
