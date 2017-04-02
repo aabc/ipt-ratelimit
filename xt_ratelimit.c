@@ -88,6 +88,7 @@ struct ratelimit_car {
 	u32 cir;			/* committed information rate (bits/s) / (HZ * 8) */
 };
 
+/* stat not related to policing */
 struct ratelimit_stat {
 	atomic64_t green_bytes;
 	atomic64_t red_bytes;
@@ -103,14 +104,15 @@ struct ratelimit_stat {
 #endif
 };
 
-/* hash bucket entity */
+/* hash bucket match entry */
 struct ratelimit_match {
 	struct hlist_node node;		/* hash bucket list */
 	__be32 addr;
-	struct ratelimit_ent *ent;	/* owner */
+	u8 prefix;
+	struct ratelimit_ent *ent;	/* owner struct, where they are stored in array */
 };
 
-/* set enitiy: can have many IPs */
+/* set entity: can have many IPs */
 struct ratelimit_ent {
 	struct rcu_head rcu;		/* destruction call list */
 	int mtcnt;			/* size of matches[mtcnt] */
@@ -118,12 +120,13 @@ struct ratelimit_ent {
 	struct ratelimit_car car;
 	spinlock_t lock_bh;
 
-		/* variable sized array for actual hash entries, it's
-		 * to optimize memory allocation and data locality
-		 * (without too much hope, though, becasue car and stat
-		 * structs are too big to fit into same cache line */
+	/* variable sized array to store actual hash match entries (instead of
+	 * a list) belonging to a single policing entity */
 	struct ratelimit_match matches[0];
 };
+
+#define MAX_PREFIX 32
+#define NUM_PREFIX (MAX_PREFIX + 1)
 
 /* per-net named hash table, locked with ratelimit_mutex */
 struct xt_ratelimit_htable {
@@ -132,11 +135,13 @@ struct xt_ratelimit_htable {
 	spinlock_t lock;		/* write access to hash */
 	unsigned int mt_count;		/* currently matches in the hash */
 	unsigned int ent_count;		/* currently entities linked */
-	unsigned int size;		/* hash array size */
+	unsigned int size;		/* hash array size, set from hashsize */
 	int other;			/* what to do with 'other' packets */
 	struct net *net;		/* for destruction */
 	struct proc_dir_entry *pde;
 	char name[XT_RATELIMIT_NAME_LEN];
+	int prefix_count[NUM_PREFIX];	/* housekeeping of bitmask */
+	DECLARE_BITMAP(prefix_bitmap, NUM_PREFIX);
 	struct hlist_head hash[0];	/* rcu lists array[size] of ratelimit_match'es */
 };
 
@@ -192,9 +197,13 @@ static int ratelimit_seq_ent_show(struct ratelimit_match *mt,
 	/* lock for consistent reads from the counters */
 	spin_lock_bh(&ent->lock_bh);
 	for (i = 0; i < ent->mtcnt; i++) {
+		struct ratelimit_match *mti = &ent->matches[i];
+
 		seq_printf(s, "%s%pI4",
 		    i == 0? "" : ",",
-		    &ent->matches[i].addr);
+		    &mti->addr);
+		if (mti->prefix != 32)
+			seq_printf(s, "/%d", mti->prefix);
 	}
 	seq_printf(s, " cir %u cbs %u ebs %u;",
 	    ent->car.cir * (HZ * BITS_PER_BYTE), ent->car.cbs, ent->car.ebs);
@@ -301,9 +310,13 @@ static int ratelimit_proc_open(struct inode *inode, struct file *file)
 	return ret;
 }
 
+static inline u32 bits2mask(int bits) {
+	return (bits? 0xffffffff << (32 - bits) : 0);
+}
+
 static void ratelimit_table_flush(struct xt_ratelimit_htable *ht);
 static struct ratelimit_ent *ratelimit_ent_zalloc(int msize);
-static inline struct ratelimit_ent *ratelimit_match_find(const struct xt_ratelimit_htable *ht, const __be32 addr);
+static inline struct ratelimit_ent *ratelimit_match_find(const struct xt_ratelimit_htable *ht, const __be32 addr, const u8 prefix);
 static void ratelimit_ent_add(struct xt_ratelimit_htable *ht, struct ratelimit_ent *ent);
 static void ratelimit_ent_del(struct xt_ratelimit_htable *ht, struct ratelimit_ent *ent);
 
@@ -378,6 +391,8 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	    p < endp && *p && (ptok = in4_pton(p, size - (p - str), (u8 *)&addr, -1, &p));
 	    ++p) {
 		++ent_size;
+		if ((p + 1) < endp && *p == '/')
+			for (++p; p < endp && *p >= '0' && *p <= '9'; ++p);
 		if (p >= endp || !*p || *p == ' ')
 			break;
 		else if (*p != ',') {
@@ -401,9 +416,18 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 	    ++p, ++i) {
 		struct ratelimit_match *mt = &ent->matches[i];
 		int j;
+		unsigned int pfx = 32;
+		const char *pref;
 
 		BUG_ON(i >= ent_size);
-		mt->addr = addr;
+		if ((p + 1) < endp && *p == '/') {
+			for (++p, pref = p; p < endp && *p >= '0' && *p <= '9'; ++p);
+			pfx = simple_strtoul(pref, NULL, 10);
+			if (pfx > 32)
+				pfx = 32;
+		}
+		mt->addr = addr & htonl(bits2mask(pfx));
+		mt->prefix = pfx;
 		mt->ent = ent;
 		++ent->mtcnt;
 		/* there should not be duplications,
@@ -468,7 +492,7 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		struct ratelimit_match *mt = &ent->matches[i];
 		struct ratelimit_ent *tent;
 
-		tent = ratelimit_match_find(ht, mt->addr);
+		tent = ratelimit_match_find(ht, mt->addr, mt->prefix);
 		if (!ent_chk)
 			ent_chk = tent;
 		if (tent != ent_chk) {
@@ -606,6 +630,9 @@ static int htable_create(struct net *net, struct xt_ratelimit_mtinfo *minfo)
 	ht->use = 1;
 	ht->mt_count = 0;
 	ht->ent_count = 0;
+	bitmap_zero(ht->prefix_bitmap, NUM_PREFIX);
+	for (i = 0; i < NUM_PREFIX; i++)
+		ht->prefix_count[i] = 0;
 	strcpy(ht->name, minfo->name);
 	spin_lock_init(&ht->lock);
 	ht->pde = proc_create_data(minfo->name, 0644, ratelimit_net->ipt_ratelimit,
@@ -630,19 +657,21 @@ hash_addr(const struct xt_ratelimit_htable *ht, const __be32 addr)
 /* get (car) entity by address */
 static inline struct ratelimit_ent *
 ratelimit_match_find(const struct xt_ratelimit_htable *ht,
-    const __be32 addr)
+    const __be32 addr, const u8 prefix)
 {
-	const u_int32_t hash = hash_addr(ht, addr);
+	const __be32 mask = htonl(bits2mask(prefix));
+	const __be32 addr_masked = addr & mask;
+	const u_int32_t hash = hash_addr(ht, addr_masked);
 
 	if (!hlist_empty(&ht->hash[hash])) {
 		struct ratelimit_match *mt;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)
 		struct hlist_node *pos;
 #endif
-
-		compat_hlist_for_each_entry_rcu(mt, pos, &ht->hash[hash], node)
-			if (mt->addr == addr)
+		compat_hlist_for_each_entry_rcu(mt, pos, &ht->hash[hash], node) {
+			if (mt->addr == addr_masked && mt->prefix == prefix)
 				return mt->ent;
+		}
 	}
 	return NULL;
 }
@@ -683,6 +712,9 @@ static void ratelimit_match_free(struct xt_ratelimit_htable *ht,
 	hlist_del_rcu(&mt->node);
 	BUG_ON(ht->mt_count == 0);
 	--ht->mt_count;
+
+	if (--ht->prefix_count[mt->prefix] == 0)
+		clear_bit(MAX_PREFIX - mt->prefix, ht->prefix_bitmap);
 
 	BUG_ON(ent->mtcnt == 0);
 	if (--ent->mtcnt == 0) {
@@ -749,6 +781,8 @@ static void ratelimit_ent_add(struct xt_ratelimit_htable *ht,
 
 		hlist_add_head_rcu(&mt->node, &ht->hash[hash_addr(ht, mt->addr)]);
 		ht->mt_count++;
+		if (++ht->prefix_count[mt->prefix] == 1)
+			set_bit(MAX_PREFIX - mt->prefix, ht->prefix_bitmap);
 	}
 	ht->ent_count++;
 }
@@ -758,6 +792,7 @@ static void htable_destroy(struct xt_ratelimit_htable *ht)
 	/* under ratelimit_mutex */
 {
 	struct ratelimit_net *ratelimit_net = ratelimit_pernet(ht->net);
+	int i;
 
 	/* ratelimit_net_exit() can independently unregister
 	 * proc entries */
@@ -768,6 +803,9 @@ static void htable_destroy(struct xt_ratelimit_htable *ht)
 	htable_cleanup(ht);
 	BUG_ON(ht->mt_count != 0);
 	BUG_ON(ht->ent_count != 0);
+	BUG_ON(!bitmap_empty(ht->prefix_bitmap, NUM_PREFIX));
+	for (i = 0; i < NUM_PREFIX; i++)
+		BUG_ON(ht->prefix_count[i]);
 	kvfree(ht);
 }
 
@@ -827,9 +865,10 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
 	const struct xt_ratelimit_mtinfo *mtinfo = par->matchinfo;
 	struct xt_ratelimit_htable *ht = mtinfo->ht;
-	struct ratelimit_ent *ent;
+	struct ratelimit_ent *ent = NULL;
 	const unsigned long now = jiffies;
 	__be32 addr;
+	int invprefix;
 	int match = false; /* no match, no drop */
 
 	if (mtinfo->mode & XT_RATELIMIT_DST)
@@ -838,7 +877,11 @@ ratelimit_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		addr = ip_hdr(skb)->saddr;
 
 	rcu_read_lock();
-	ent = ratelimit_match_find(ht, addr);
+	/* first match from longest prefix upwards */
+	for_each_set_bit(invprefix, ht->prefix_bitmap, NUM_PREFIX) {
+		if ((ent = ratelimit_match_find(ht, addr, MAX_PREFIX - invprefix)))
+			break;
+	}
 	if (ent) {
 		struct ratelimit_car *car = &ent->car;
 		const unsigned int len = skb->len; /* L3 */

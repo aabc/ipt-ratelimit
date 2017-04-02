@@ -54,6 +54,10 @@ load: all
 	-iptables -I INPUT  -m ratelimit --ratelimit-set src --ratelimit-mode src -j DROP
 	-iptables -I OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
 	-echo +127.0.0.1 1000000 > /proc/net/ipt_ratelimit/src
+	-echo +127.0.0.1/24 1000000 > /proc/net/ipt_ratelimit/dst
+	-echo +127.0.0.1/16 1000000 > /proc/net/ipt_ratelimit/dst
+	-echo +127.0.0.1/8 1000000 > /proc/net/ipt_ratelimit/dst
+	-echo +127.0.0.1/0 1000000 > /proc/net/ipt_ratelimit/dst
 	-echo +127.0.0.1 1000000 > /proc/net/ipt_ratelimit/dst
 unload:
 	-echo / > /proc/net/ipt_ratelimit/src
