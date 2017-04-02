@@ -80,11 +80,15 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
   Usage of set files:
 
-    * To add IPs to the set write string in the following format:
+    * To add IPs or CIDRs to the set write string in the following format:
 
-       +IPv4[,IPv4...] bitrate [normal_burst [extended_burst]]
+       +IPv4[,CIDR...] bitrate [normal_burst [extended_burst]]
 
     Examples:
+
+      # echo +10.0.0.0/24 1000000 > /proc/net/ipt_ratelimit/name0
+
+      - ratelimit network 10.0.0.0/24 to 1Mbit.
 
       # echo +10.0.0.1 1000000 > /proc/net/ipt_ratelimit/name0
       # echo +10.0.0.1 1000000 187500 > /proc/net/ipt_ratelimit/name0
@@ -130,9 +134,9 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
     * Stat output example and format:
 
-    10.0.1.5 cir 1000000 cbs 187500 ebs 375000; tc 0 te 0 last never; conf 0/0 0 bps, rej 0/0
+    10.0.1.0/24 cir 1000000 cbs 187500 ebs 375000; tc 0 te 0 last never; conf 0/0 0 bps, rej 0/0
 
-      10.0.1.5     IP to match,
+      10.0.1.0/24  IPv4 network to match,
       cir 1000000  allowed rate   (cir is committed information rate) in bits,
       cbs 187500   normal burst   (cbs is committed burst size) in bytes,
       ebs 375000   extended burst (cbs is extended burst size) in bytes,
