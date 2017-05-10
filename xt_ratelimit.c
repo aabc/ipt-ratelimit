@@ -179,8 +179,7 @@ unsigned long calc_rate_est(const struct ratelimit_stat *stat)
 	{
 		const unsigned int slot_delta_rtime = RATEST_JIFFIES - (now % RATEST_JIFFIES);
 #define SMOOTH_VAUE 10 /* smoothen integer arithmetics */
-		const unsigned int prev_ratio = (slot_delta_rtime)?
-			RATEST_JIFFIES * SMOOTH_VAUE / slot_delta_rtime : SMOOTH_VAUE;
+		const unsigned int prev_ratio = RATEST_JIFFIES * SMOOTH_VAUE / slot_delta_rtime;
 
 		bps = bps * SMOOTH_VAUE / prev_ratio;
 		bps += cur_bytes;
