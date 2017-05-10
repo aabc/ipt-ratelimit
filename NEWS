@@ -1,6 +1,17 @@
 ipt-ratelimit NEWS
 ==================
 
+0.3 (2017-05-10)
+
+    * Support for CIDR notation.
+    * Support for IPv6.
+
+0.2 (2015-11-13)
+
+    * Allow to hide warning messages.
+    * Allow updating of existing rules.
+    * Can specify behavior for 'not matched' packets.
+    * Code audit.
 
 0.1 (2015-09-20)
 

@@ -32,7 +32,7 @@ version.h: xt_ratelimit.c xt_ratelimit.h compat.h Makefile
 	@./version.sh --define > version.h
 
 clean:
-	make -C $(KDIR) M=$(CURDIR) clean
+	-make -C $(KDIR) M=$(CURDIR) clean
 	-rm -f *.so *_sh.o *.o modules.order
 
 install: | minstall linstall
@@ -50,19 +50,20 @@ uninstall:
 load: all
 	-sync
 	-modprobe x_tables
-	-insmod xt_ratelimit.ko
-	-iptables -I INPUT  -m ratelimit --ratelimit-set src --ratelimit-mode src -j DROP
-	-iptables -I OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
+	-insmod ./xt_ratelimit.ko
+	-iptables  -I INPUT  -m ratelimit --ratelimit-set src --ratelimit-mode src -j DROP
+	-iptables  -I OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
+	-ip6tables -I OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
 	-echo +127.0.0.1 1000000 > /proc/net/ipt_ratelimit/src
 	-echo +127.0.0.1/24 1000000 > /proc/net/ipt_ratelimit/dst
-	-echo +127.0.0.1/16 1000000 > /proc/net/ipt_ratelimit/dst
+	-echo +127.2.0.1/16 1000000 > /proc/net/ipt_ratelimit/dst
 	-echo +127.0.0.1/8 1000000 > /proc/net/ipt_ratelimit/dst
-	-echo +127.0.0.1/0 1000000 > /proc/net/ipt_ratelimit/dst
-	-echo +127.0.0.1 1000000 > /proc/net/ipt_ratelimit/dst
+	-echo +::1 1000000 > /proc/net/ipt_ratelimit/dst
 unload:
 	-echo / > /proc/net/ipt_ratelimit/src
-	-iptables -D INPUT  -m ratelimit --ratelimit-set src --ratelimit-mode src -j DROP
-	-iptables -D OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
+	-iptables  -D INPUT  -m ratelimit --ratelimit-set src --ratelimit-mode src -j DROP
+	-iptables  -D OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
+	-ip6tables -D OUTPUT -m ratelimit --ratelimit-set dst --ratelimit-mode dst -j DROP
 	-rmmod xt_ratelimit.ko
 del:
 	-sync

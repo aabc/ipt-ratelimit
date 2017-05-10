@@ -1,8 +1,8 @@
-ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
+ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015-2017.
 
    An high-performance implementation of committed access rate, or simply rate
    limiting, or policing for Linux iptables. Suitable for a lot of users
-   (similar to ipset) and does not have qdisc limitations.
+   (similar to ipset) and does not have qdisc limitations. Supports IPv6.
 
 
 ============
@@ -16,6 +16,8 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
   Module is compatible with recent linux distributions such as Debian 7, 8,
   Centos 7, and Linux kernel 3.x or above.
+
+  Does support IPv6, thus useful for dual-stack policing.
 
 
 ================
@@ -82,7 +84,7 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015.
 
     * To add IPs or CIDRs to the set write string in the following format:
 
-       +IPv4[,CIDR...] bitrate [normal_burst [extended_burst]]
+       +IPv4[,IPv6,CIDR...] bitrate [normal_burst [extended_burst]]
 
     Examples:
 

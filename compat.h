@@ -41,3 +41,10 @@ static inline struct inode *file_inode(const struct file *f)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
 # define PDE_DATA(inode) PDE(inode)->data
 #endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,10,0)
+static inline u_int8_t xt_family(const struct xt_action_param *par)
+{
+		return par->family;
+}
+#endif

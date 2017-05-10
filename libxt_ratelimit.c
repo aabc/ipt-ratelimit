@@ -1,6 +1,6 @@
 /*
  * An implementation of committed access rate for Linux iptables
- * (c) 2015 <abc@telekom.ru>
+ * (c) 2015-2017 <abc@telekom.ru>
  *
  *
  *   This program is free software: you can redistribute it and/or modify
@@ -129,6 +129,19 @@ static struct xtables_match ratelimit_mt_reg[] = {
 		.name		= "ratelimit",
 		.version	= XTABLES_VERSION,
 		.family		= NFPROTO_IPV4,
+		.size		= XT_ALIGN(sizeof(struct xt_ratelimit_mtinfo)),
+		.userspacesize	= offsetof(struct xt_ratelimit_mtinfo, ht),
+		.help		= ratelimit_help,
+		.init		= ratelimit_init,
+		.print		= ratelimit_print,
+		.save		= ratelimit_save,
+		.x6_options	= ratelimit_opts,
+		.x6_parse	= ratelimit_parse,
+	},
+	{
+		.name		= "ratelimit",
+		.version	= XTABLES_VERSION,
+		.family		= NFPROTO_IPV6,
 		.size		= XT_ALIGN(sizeof(struct xt_ratelimit_mtinfo)),
 		.userspacesize	= offsetof(struct xt_ratelimit_mtinfo, ht),
 		.help		= ratelimit_help,
