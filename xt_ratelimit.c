@@ -614,7 +614,7 @@ unlock_einval:
 	return -EINVAL;
 }
 
-static char proc_buf[4000];
+static char proc_buf[8000];
 
 static ssize_t
 ratelimit_proc_write(struct file *file, const char __user *input,
