@@ -1,4 +1,4 @@
-License is GPL v2, is the same as of Linux kernel:
+License is GPL-2.0-only, is the same as of Linux kernel:
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -45,7 +45,7 @@ Sign-off rule is that of the Linux kernel:
 
 Principal author and project maintainer:
 
-   ABC <abc@telekom.ru> [2015-2017]
+   ABC <abc@openwall.com> [2015-2020]
 
 
 xt_hashlimit and xt_recent implementation from Linux Kernel is used for

@@ -1,8 +1,10 @@
-ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015-2017.
+ipt-ratelimit linux kernel module by <abc@openwall.com> -- (c) 2015-2020.
 
    An high-performance implementation of committed access rate, or simply rate
    limiting, or policing for Linux iptables. Suitable for a lot of users
    (similar to ipset) and does not have qdisc limitations. Supports IPv6.
+
+   Official project homepage @ https://github.com/aabc/ipt-ratelimit
 
 
 ============
@@ -96,7 +98,7 @@ ipt-ratelimit linux kernel module by <abc@telekom.ru> -- (c) 2015-2017.
       # echo +10.0.0.1 1000000 187500 > /proc/net/ipt_ratelimit/name0
       # echo +10.0.0.1 1000000 187500 375000 > /proc/net/ipt_ratelimit/name0
 
-      - these three lines are equal, becasue normal burst (cbs) and extended
+      - these three lines are equal, because normal burst (cbs) and extended
 	burst (ebs), when not specified, are calculated automatically by
 	optimal formula:
 

@@ -1,6 +1,6 @@
 /*
  * An implementation of committed access rate for Linux iptables
- * (c) 2015-2017 <abc@telekom.ru>
+ * (c) 2015-2020 <abc@openwall.com>
  *
  * Based on xt_hashlimit and in lesser extent on xt_recent.
  *
@@ -51,7 +51,7 @@
 # define XT_RATELIMIT_VERSION GIT_VERSION
 #endif
 
-MODULE_AUTHOR("<abc@telekom.ru>");
+MODULE_AUTHOR("<abc@openwall.com>");
 MODULE_DESCRIPTION("iptables ratelimit policer mt module");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(XT_RATELIMIT_VERSION);
@@ -178,7 +178,7 @@ unsigned long calc_rate_est(const struct ratelimit_stat *stat)
 
 	{
 		const unsigned int slot_delta_rtime = RATEST_JIFFIES - (now % RATEST_JIFFIES);
-#define SMOOTH_VAUE 10 /* smoothen integer arithmetics */
+#define SMOOTH_VAUE 10 /* smoothen integer arithmetic */
 		const unsigned int prev_ratio = RATEST_JIFFIES * SMOOTH_VAUE / slot_delta_rtime;
 
 		bps = bps * SMOOTH_VAUE / prev_ratio;
@@ -895,7 +895,7 @@ static void ratelimit_ent_add(struct xt_ratelimit_htable *ht,
 
 		hlist_add_head_rcu(&mt->node, &ht->hash[hash]);
 		ht->mt_count++;
-		/* mark bits in reverse order, becasue I need to search
+		/* mark bits in reverse order, because I need to search
 		 * from highest mask to lowest */
 		if (++ht->prefix_count[mt->prefix] == 1)
 			set_bit(max_prefix - mt->prefix, ht->prefix_bitmap);

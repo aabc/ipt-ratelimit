@@ -1,6 +1,6 @@
 /*
  * An implementation of committed access rate for Linux iptables
- * (c) 2015-2017 <abc@telekom.ru>
+ * (c) 2015-2017 <abc@openwall.com>
  *
  *
  *   This program is free software: you can redistribute it and/or modify
@@ -39,7 +39,7 @@ static void ratelimit_help(void)
 "  --ratelimit-set <name>    Name of the ratelimit set to be used.\n"
 "                            DEFAULT will be used if none given.\n"
 "  --ratelimit-mode <mode>   Address match: src or dst.\n"
-"xt_ratelimit by: ABC <abc@telekom.ru>.\n");
+"xt_ratelimit by: ABC <abc@openwall.com>.\n");
 }
 
 enum {

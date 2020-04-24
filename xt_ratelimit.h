@@ -1,6 +1,6 @@
 /*
  * An implementation of committed access rate for Linux iptables
- * (c) 2015 <abc@telekom.ru>
+ * (c) 2015 <abc@openwall.com>
  *
  *
  *   This program is free software: you can redistribute it and/or modify
