@@ -657,6 +657,15 @@ ratelimit_proc_write(struct file *file, const char __user *input,
 	return p - proc_buf;
 }
 
+#ifdef DEFINE_PROC_SHOW_ATTRIBUTE
+static const struct proc_ops ratelimit_fops = {
+	.proc_open	= ratelimit_proc_open,
+	.proc_read	= seq_read,
+	.proc_write	= ratelimit_proc_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= seq_release,
+};
+#else
 static const struct file_operations ratelimit_fops = {
 	.owner		= THIS_MODULE,
 	.open		= ratelimit_proc_open,
@@ -665,6 +674,7 @@ static const struct file_operations ratelimit_fops = {
 	.llseek		= seq_lseek,
 	.release	= seq_release,
 };
+#endif
 
 /* allocate named hash table, register its proc entry */
 static int htable_create(struct net *net, struct xt_ratelimit_mtinfo *minfo)
