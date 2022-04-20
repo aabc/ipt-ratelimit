@@ -1,6 +1,10 @@
 ipt-ratelimit NEWS
 ==================
 
+0.3.3 (2022-04-20)
+
+    * Fix build on Linux v5.17.
+
 0.3.2 (2020-08-18)
 
     * Fix soft lockup if used via nftables.
