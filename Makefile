@@ -9,7 +9,7 @@ CFLAGS_xt_ratelimit.o := -DDEBUG
 all: xt_ratelimit.ko libxt_ratelimit.so
 
 xt_ratelimit.ko: version.h xt_ratelimit.c xt_ratelimit.h compat.h
-	make -C $(KDIR) M=$(CURDIR) modules CONFIG_DEBUG_INFO=y
+	make -C $(KDIR) M=$(CURDIR) modules
 	-sync
 
 %_sh.o: libxt_ratelimit.c xt_ratelimit.h
