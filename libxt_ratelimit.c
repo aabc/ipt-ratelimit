@@ -153,7 +153,7 @@ static struct xtables_match ratelimit_mt_reg[] = {
 	},
 };
 
-void _init(void)
+static void __attribute__((constructor)) _init(void)
 {
 	xtables_register_matches(ratelimit_mt_reg, ARRAY_SIZE(ratelimit_mt_reg));
 }
