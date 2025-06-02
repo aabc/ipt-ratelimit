@@ -580,9 +580,11 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		 * should be equal (this is correct, because duplications
 		 * inside of set(s) are impossible) */
 		if (!ent_chk) {
-			if (warn)
+			if (warn) {
 				pr_err("Del op doesn't reference any existing address (cmd: %s)\n", buf);
-			goto unlock_einval;
+				goto unlock_einval;
+			}
+			goto retok;
 		}
 		if (ent_chk->mtcnt != ent->mtcnt) {
 			pr_err("Del op doesn't match other rule set fully (cmd: %s)\n", buf);
@@ -602,6 +604,8 @@ static int parse_rule(struct xt_ratelimit_htable *ht, char *str, size_t size)
 		}
 	} else
 		ratelimit_ent_del(ht, ent_chk);
+
+retok:
 	spin_unlock(&ht->lock);
 
 	if (ent)
